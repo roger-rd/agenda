@@ -1,0 +1,62 @@
+export type Role = 'community_manager' | 'worker' | 'client';
+export type PostStatus = 'Pendiente' | 'En proceso' | 'Completado' | 'Subido';
+export type PostFormat = 'Post' | 'Carrusel' | 'Reel' | 'Historia';
+export interface Organization {
+    id: string;
+    name: string;
+}
+export interface Company {
+    id: string;
+    organizationId: string;
+    name: string;
+    color: string;
+}
+export interface User {
+    id: string;
+    name: string;
+    role: Role;
+    example: boolean;
+}
+export interface Membership {
+    id: string;
+    userId: string;
+    companyId: string;
+}
+export interface Attachment {
+    id: string;
+    name: string;
+    url: string;
+    mimeType: string;
+}
+export interface Comment {
+    id: string;
+    postId: string;
+    authorId: string;
+    body: string;
+    createdAt: string;
+}
+export interface Post {
+    id: string;
+    companyId: string;
+    title: string;
+    description: string;
+    scheduledAt: string;
+    format: PostFormat;
+    status: PostStatus;
+    responsibleId: string;
+    visible_para_cliente: boolean;
+    attachments: Attachment[];
+    confirmadoPor?: string;
+    confirmadoEn?: string;
+}
+export interface State {
+    version: 1;
+    organization: Organization;
+    companies: Company[];
+    users: User[];
+    memberships: Membership[];
+    posts: Post[];
+    role: Role;
+    authenticated: boolean;
+    activeCompanyId: string;
+}
