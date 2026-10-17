@@ -25,7 +25,7 @@ export interface Membership {
 export interface Attachment {
     id: string;
     name: string;
-    url: string;
+    size: number;
     mimeType: string;
 }
 export interface Comment {
@@ -46,11 +46,13 @@ export interface Post {
     responsibleId: string;
     visible_para_cliente: boolean;
     attachments: Attachment[];
+    instagramUrl?: string;
     confirmadoPor?: string;
     confirmadoEn?: string;
 }
 export interface State {
-    version: 1;
+    version: 2;
+    comments: Comment[];
     organization: Organization;
     companies: Company[];
     users: User[];

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { X, Image, Layers, Film, CirclePlay } from 'lucide-react';
 import type { PostFormat, PostStatus } from '../types';
 export function Button({ className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement>) { return <button className={`button ${className}`} {...props}/>; }
@@ -12,13 +12,49 @@ export function StatusBadge({ status }: {
 export function FormatBadge({ format }: {
     format: PostFormat;
 }) { const Icon = { Post: Image, Carrusel: Layers, Reel: Film, Historia: CirclePlay }[format]; return <span className="format"><Icon size={12}/>{format}</span>; }
-export function Modal({ title, onClose, children }: {
+export function Modal({ title, onClose, children, side = false, initialFocus }: {
     title: string;
     onClose: () => void;
     children: ReactNode;
+    side?: boolean;
+    initialFocus?: string;
 }) {
     const ref = useRef<HTMLDialogElement>(null);
-    useEffect(() => { const previous = document.activeElement as HTMLElement; const dialog = ref.current; dialog?.showModal(); return () => { dialog?.close(); previous?.focus(); }; }, []);
-    return <dialog ref={ref} onCancel={e => { e.preventDefault(); onClose(); }} onClick={e => { if (e.target === e.currentTarget)
-        onClose(); }} aria-labelledby="dialog-title"><div className="modal-head"><h2 id="dialog-title">{title}</h2><Button aria-label="Cerrar" onClick={onClose}><X size={18}/></Button></div><div className="modal-body">{children}</div></dialog>;
+    const titleId = useId();
+    useEffect(() => {
+        const previous = document.activeElement as HTMLElement;
+        const dialog = ref.current;
+        dialog?.showModal();
+        if (initialFocus) dialog?.querySelector<HTMLElement>(initialFocus)?.focus();
+        return () => {
+            dialog?.close();
+            if (previous?.isConnected) previous.focus();
+            else document.querySelector<HTMLElement>('.view-switch [aria-pressed="true"]')?.focus();
+        };
+    }, [initialFocus]);
+    return <dialog ref={ref} role="dialog" aria-modal="true"
+        className={side ? 'side-panel' : undefined}
+        aria-labelledby={titleId}
+        onCancel={e => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+        onClick={e => {
+            if (e.target !== e.currentTarget) return;
+            const box = e.currentTarget.getBoundingClientRect();
+            if (e.clientX < box.left || e.clientX > box.right
+                || e.clientY < box.top || e.clientY > box.bottom) onClose();
+        }}
+        onKeyDown={e => {
+            if (e.key !== 'Tab' || e.target instanceof Element
+                && e.target.closest('dialog') !== ref.current) return;
+            const items = Array.from(ref.current!.querySelectorAll<HTMLElement>(
+                'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]'
+            )).filter(el => el.getClientRects().length && el.closest('dialog') === ref.current);
+            const first = items[0];
+            const last = items[items.length - 1];
+            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+        }}>
+        <div className="modal-head"><h2 id={titleId}>{title}</h2>
+            <Button aria-label="Cerrar" onClick={onClose}><X size={18}/></Button>
+        </div><div className="modal-body">{children}</div>
+    </dialog>;
 }
