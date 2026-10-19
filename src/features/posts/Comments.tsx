@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
+import { preferredScrollBehavior } from '../../lib/scroll';
 import { Button } from '../../components/ui';
 import { actions, useStore } from '../../store';
 import { can } from '../../store/permissions';
@@ -10,10 +11,21 @@ export function Comments({ postId, onDirtyChange }: { postId: string; onDirtyCha
   const [body, setBody] = useState('');
   const [error, setError] = useState('');
   const input = useRef<HTMLTextAreaElement>(null);
+  const list = useRef<HTMLOListElement>(null);
+  const added = useRef(false);
+  useLayoutEffect(() => {
+    if (!added.current) return;
+    added.current = false;
+    input.current?.focus({ preventScroll: true });
+    const frame = requestAnimationFrame(() => {
+      list.current?.lastElementChild?.scrollIntoView({ block: 'nearest', behavior: preferredScrollBehavior() });
+    });
+    return () => cancelAnimationFrame(frame);
+  });
   return <section className="comments" aria-label="Comentarios">
     <h3>Comentarios</h3>
     <p>Los comentarios se comparten con el cliente cuando la publicación es visible.</p>
-    <ol>{selectComments(state, postId).map(comment => {
+    <ol ref={list}>{selectComments(state, postId).map(comment => {
       const author = state.users.find(u => u.id === comment.authorId);
       return <li key={comment.id}>
         <strong>{author?.name} · {author && roles[author.role]}</strong>
@@ -24,14 +36,15 @@ export function Comments({ postId, onDirtyChange }: { postId: string; onDirtyCha
     {can(state.role, 'comment') && <form noValidate onSubmit={event => {
       event.preventDefault();
       const result = actions.addComment(postId, body);
-      if (result.ok) { setBody(''); setError(''); onDirtyChange?.(false); }
+      if (result.ok) { added.current = true; setBody(''); setError(''); onDirtyChange?.(false); }
       else { setError(result.reason); input.current?.focus(); }
     }}>
-      <label>Añadir comentario<textarea ref={input} rows={3} maxLength={2000} required
+      <label>Comentario<textarea ref={input} rows={3} maxLength={2000} required
         value={body} onChange={e => { setBody(e.target.value); setError(''); onDirtyChange?.(!!e.target.value); }} aria-invalid={!!error}
         aria-describedby={error ? 'comment-error' : undefined} /></label>
+      <span className="comment-limit">{body.length}/2000 caracteres</span>
       {error && <p id="comment-error" role="alert" className="field-error">{error}</p>}
-      <Button type="submit">Añadir comentario</Button>
+      <Button type="submit" aria-label="Enviar comentario">Enviar comentario</Button>
     </form>}
   </section>;
 }

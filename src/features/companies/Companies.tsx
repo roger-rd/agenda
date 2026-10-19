@@ -40,7 +40,7 @@ export function Companies() {
     </div>
     {!companies.length && <div className="empty">{query ? 'No hay empresas que coincidan con tu búsqueda.' : 'No hay empresas disponibles.'}{query && <Button onClick={() => setQuery('')}>Limpiar filtros</Button>}</div>}
     <p className="footnote">Las tareas pendientes corresponden a publicaciones pendientes o en proceso del mes actual en Santiago.</p>
-    {creating && <Modal title="Crear empresa de demostración" onClose={close}>
+    {creating && <Modal className="company-modal" title="Crear empresa de demostración" onClose={close}>
       <form onSubmit={e => { e.preventDefault(); const result = actions.createCompany(name, color); if (!result.ok) { setError(result.reason); return; } setCreating(false); setName(''); setColor('#5753c9'); setError(''); }}
       >
         {error && <p role="alert">{error}</p>}
@@ -50,7 +50,7 @@ export function Companies() {
         </label>
         <Button className="primary" disabled={!name.trim()}>Crear empresa</Button>
       </form>
-    {confirm && <Modal title="Descartar cambios sin guardar" onClose={() => setConfirm(false)} initialFocus=".keep-company">
+    {confirm && <Modal className="company-modal" title="Descartar cambios sin guardar" onClose={() => setConfirm(false)} initialFocus=".keep-company">
         <p>Hay cambios sin guardar. ¿Quieres descartarlos?</p>
         <div className="modal-actions"><Button className="keep-company" onClick={() => setConfirm(false)}>Seguir editando</Button>
           <Button onClick={() => { setConfirm(false); setCreating(false); setName(''); setColor('#5753c9'); setError(''); }}>Descartar cambios</Button></div>

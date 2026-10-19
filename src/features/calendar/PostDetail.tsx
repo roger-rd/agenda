@@ -18,7 +18,7 @@ export function PostDetail({ id, companyId, onClose, onSaved }: { id: string; co
   const state = useStore();
   const selected = selectPost(state, id);
   const post = selected?.companyId === companyId ? selected : undefined;
-  return <Modal title={post ? 'Detalle de la publicación' : 'Publicación no disponible'} onClose={close}>
+  return <Modal adaptive className="post-dialog post-detail-dialog" title={post ? 'Detalle de la publicación' : 'Publicación no disponible'} onClose={close}>
     {post ? <>
       <div className="detail-badges">
         <StatusControl post={post} />
@@ -40,9 +40,10 @@ export function PostDetail({ id, companyId, onClose, onSaved }: { id: string; co
       </dl>
       {post.instagramUrl && <p><a href={post.instagramUrl} target="_blank" rel="noreferrer">Ver en Instagram</a></p>}
       <Attachments items={post.attachments} />
-      <div className="modal-actions">
+      <div className="modal-actions detail-actions">
         {can(state.role, 'editPost') && <Button onClick={() => setEditing(true)}>Editar</Button>}
         {can(state.role, 'deletePost') && <DeletePost id={post.id} onDeleted={onClose} />}
+        {can(state.role, 'comment') && <Button type="button" aria-label="Comentar" className="comment-shortcut" onClick={event => event.currentTarget.closest('dialog')?.querySelector<HTMLTextAreaElement>('.comments textarea')?.focus()}>Comentar</Button>}
       </div>
       <Comments postId={post.id} onDirtyChange={setDirtyComment} />
       {editing && <PostForm companyId={companyId} day="" post={post} onSaved={onSaved}
@@ -51,7 +52,7 @@ export function PostDetail({ id, companyId, onClose, onSaved }: { id: string; co
       <p>Esta publicación no existe o no está disponible para tu perfil.</p>
       <Button onClick={onClose}>Cerrar</Button>
     </>}
-    {confirm && <Modal title="Descartar comentario sin guardar" onClose={() => setConfirm(false)} initialFocus=".keep-comment">
+    {confirm && <Modal adaptive className="filters-sheet confirmation-sheet" title="Descartar comentario sin guardar" onClose={() => setConfirm(false)} initialFocus=".keep-comment">
       <p>Hay un comentario sin guardar. ¿Quieres descartarlo?</p>
       <div className="modal-actions"><Button className="keep-comment" onClick={() => setConfirm(false)}>Seguir escribiendo</Button>
         <Button onClick={onClose}>Descartar comentario</Button></div>

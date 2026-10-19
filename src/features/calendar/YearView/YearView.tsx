@@ -1,5 +1,5 @@
 import { pluralize } from '../../../lib/pluralize';
-import { zonedFormat } from '../../../lib/dates';
+import { dayCountLabel, todayKey, zonedFormat } from '../../../lib/dates';
 import { dateKey, periodDays, periodLabel } from '../../../lib/periods';
 import type { ViewProps } from '../viewTypes';
 export function YearView({ reference, posts, onMonth }: ViewProps & { onMonth: (month: string) => void }) {
@@ -18,7 +18,7 @@ export function YearView({ reference, posts, onMonth }: ViewProps & { onMonth: (
       <div className="mini-grid">{periodDays(month, 'mes', true).map(date => {
         const key = dateKey(date);
         const count = counts.get(key) ?? 0;
-        return <span key={key} className={`${key.slice(0, 7) !== month.slice(0, 7) ? 'outside' : ''} ${count ? 'has-posts' : ''}`} aria-label={`${key}: ${pluralize(count, 'publicación', 'publicaciones')}`}>{date.getDate()}{count > 0 && <span aria-hidden="true">•</span>}</span>;
+        return <span key={key} className={`${key.slice(0, 7) !== month.slice(0, 7) ? 'outside' : ''} ${count ? 'has-posts' : ''}`} aria-label={dayCountLabel(key, count, key === todayKey())}>{date.getDate()}{count > 0 && <span aria-hidden="true">•</span>}</span>;
       })}</div>
     </button>;
   })}</div>;

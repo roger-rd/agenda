@@ -817,3 +817,279 @@ textarea:focus-visible { outline: 3px solid #8985ec; outline-offset: 3px; }
 .company-card, .page-heading > div, .topbar > div { min-width: 0; overflow-wrap: anywhere; }
 .board-meta, .board-column header { flex-wrap: wrap; }
 .calendar-surface > .notice, .calendar-surface > [aria-live] { flex-shrink: 0; }
+
+/* Bloque móvil 1. Breakpoints shared with lib/responsive.ts:
+   móvil <640px; tablet 640–1023px; escritorio >=1024px.
+   CSS variables cannot be used in native media query conditions.
+   Legacy 1100/760 rules remain for untouched views and desktop parity. */
+:root {
+  --tap: 44px;
+  --responsive-gap: 16px;
+  --responsive-padding: 20px;
+  --z-mobile-bar: 110;
+  --z-drawer-overlay: 120;
+  --z-drawer: 130;
+}
+.mobile-topbar, .drawer-close, .drawer-overlay, .login-brand { display: none; }
+
+@media (width < 1024px) {
+  .app-shell { grid-template-columns: minmax(0, 1fr); }
+  .main-content {
+    padding: var(--responsive-padding);
+    padding-bottom: max(var(--responsive-padding), env(safe-area-inset-bottom));
+  }
+  .topbar { display: none; }
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+    min-height: 64px;
+    padding: 8px max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
+    padding-top: max(8px, env(safe-area-inset-top));
+    background: white;
+    border-bottom: 1px solid #e6e5e9;
+    position: sticky;
+    top: 0;
+    z-index: var(--z-mobile-bar);
+  }
+  .mobile-topbar strong { min-width: 0; overflow-wrap: anywhere; flex: 1; }
+  .mobile-topbar > span { font-size: 12px; color: #777887; text-transform: capitalize; }
+  .menu-trigger { flex-shrink: 0; min-width: var(--tap); min-height: var(--tap); }
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(360px, calc(100% - 24px));
+    height: 100dvh;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    z-index: var(--z-drawer);
+    visibility: hidden;
+    transform: translateX(-100%);
+    transition: transform 180ms ease;
+  }
+  .sidebar.drawer-open { visibility: visible; transform: translateX(0); }
+  .drawer-overlay { display: block; position: fixed; inset: 0; background: #29223966; z-index: var(--z-drawer-overlay); }
+  .drawer-close { display: inline-flex; align-self: flex-end; margin-bottom: 16px; }
+  .sidebar > * { flex-shrink: 0; }
+  .sidebar .brand { font-size: 15px; min-height: var(--tap); }
+  .sidebar :is(button, select, nav a) { min-width: var(--tap); min-height: var(--tap); }
+  .sidebar :is(small, .eyebrow, label, .reset, .demo-mode p, .user strong, .avatar) { font-size: 12px; }
+  .sidebar select { font-size: 16px; }
+  .sidebar .user { flex-wrap: nowrap; }
+  .sidebar .user button { flex-shrink: 0; }
+  .sidebar .reset { text-align: left; }
+  .sidebar .organization { margin: 20px 9px; }
+  .demo-mode p::before { content: "Este modo simula permisos. "; }
+  .page-heading { align-items: stretch; gap: var(--responsive-gap); flex-shrink: 0; }
+  .page-heading > div:first-child { flex-basis: 100%; }
+  .page-heading :is(.eyebrow, p) { font-size: 12px; }
+  .page-heading .button { min-height: var(--tap); min-width: var(--tap); white-space: normal; }
+  .page-heading .view-switch { width: 100%; }
+  .page-heading .view-switch .button { flex: 1; }
+  .company-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--responsive-gap); }
+  .company-toolbar { flex-wrap: wrap; gap: 12px; }
+  .companies .search { width: 100%; min-height: var(--tap); }
+  .companies .search input { font-size: 16px; min-height: var(--tap); width: 100%; }
+  .companies .button { min-height: var(--tap); min-width: var(--tap); }
+  .company-card { padding: 20px; overflow-wrap: anywhere; }
+  .companies :is(.card-counts, .card-foot, .footnote, .company-card p) { font-size: 12px; }
+  .card-counts span { min-width: 0; }
+  .card-counts svg { flex-shrink: 0; }
+  .company-modal { width: 520px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; }
+  .company-modal .modal-head { gap: 12px; padding: 16px; }
+  .company-modal .modal-body { padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+  .company-modal :is(input, .button) { min-width: var(--tap); min-height: var(--tap); }
+  .company-modal input { font-size: 16px; }
+  .company-modal .button { white-space: normal; }
+  .company-modal .modal-head .button { flex-shrink: 0; }
+  .login { grid-template-columns: minmax(0, 1fr); min-height: 100dvh; padding-bottom: env(safe-area-inset-bottom); }
+  .login-story { display: none; }
+  .login-brand { display: flex; font-size: 15px; margin-bottom: 24px; }
+  .login-form { width: 440px; max-width: calc(100% - 40px); padding: 28px 0; }
+  .login :is(.eyebrow, .notice) { font-size: 12px; }
+  .login input { font-size: 16px; min-height: var(--tap); }
+  .login .button { min-height: var(--tap); min-width: var(--tap); white-space: normal; }
+}
+@media (width < 640px) {
+  :root { --responsive-padding: 16px; }
+  .mobile-topbar > span { display: none; }
+  /* Grid avoids flex-basis:100% becoming a full-height column when wrapping. */
+  .page-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    min-width: 0;
+    gap: 12px;
+  }
+  .page-heading > * { min-width: 0; max-width: 100%; }
+  .page-heading > div:first-child { flex-basis: auto; }
+  .page-heading .view-switch {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .page-heading .view-switch .button { padding-inline: 4px; }
+  .page-heading h1 { font-size: clamp(22px, 6vw, 28px); }
+  .page-heading > .button { width: 100%; }
+  .company-grid { grid-template-columns: minmax(0, 1fr); }
+  .company-card .card-counts { flex-direction: column; gap: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar { transition: none; }
+}
+
+@media (min-width: 1024px) {
+  .sidebar { visibility: visible; transform: none; }
+}
+
+/* Bloque móvil 2: los árboles de calendario conservan estado al redimensionar. */
+.compact-calendar, .compact-filter-trigger { display: none; }
+@media (width < 1024px) {
+  .desktop-calendar, .desktop-filters { display: none; }
+  .responsive-calendar { height: auto; min-height: 100%; }
+  .responsive-calendar .calendar-surface { flex: none; overflow: visible; }
+  .calendar-toolbar { padding: 12px; }
+  .month-controls { width: 100%; }
+  .month-controls h2 { flex-basis: 100%; margin: 0 0 8px; }
+  .calendar-page .button { min-height: 44px; min-width: 44px; white-space: normal; }
+  .calendar-page :is(.muted, .notice, .calendar-footer, .month-controls .button) { font-size: 12px; }
+  .calendar-footer { flex-wrap: wrap; gap: 8px; }
+  .compact-filter-trigger { display: block; padding: 0 12px 12px; }
+  .compact-calendar { display: block; min-width: 0; }
+  .compact-weekdays, .compact-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .compact-weekdays { text-align: center; padding-block: 8px; font-size: 12px; }
+  .compact-days { gap: 3px; padding: 4px; }
+  .compact-day { min-width: 0; min-height: 64px; padding: 6px 2px; border: 1px solid #e8e4f3; border-radius: 6px; background: white; color: #494056; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .compact-day.outside { color: #71677c; background: #f3f1f5; }
+  .compact-day[aria-current="date"] { outline: 2px solid #5147b9; outline-offset: -3px; }
+  .compact-day[aria-pressed="true"] { background: #5147b9; color: white; border-radius: 14px; }
+  .compact-day[aria-current="date"][aria-pressed="true"] { outline-color: white; box-shadow: 0 0 0 1px #5147b9; }
+  .compact-day:focus-visible { outline: 3px solid #bd6c16; outline-offset: 1px; }
+  .today-mark { margin-left: 2px; }
+  .day-count { font-size: 12px; font-weight: 600; border: 1px solid currentColor; border-radius: 8px; padding: 0 4px; }
+  .tablet-markers { display: none; }
+  .day-agenda { padding: 16px 12px; border-top: 1px solid #e8e4f3; margin-top: 12px; }
+  .day-agenda header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  .day-agenda h3 { font-size: 16px; margin: 0; }
+  .day-agenda p { font-size: 12px; }
+  .agenda-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .agenda-cards .post-card { padding: 14px; margin: 0; min-height: 44px; }
+  .agenda-cards .post-card strong { font-size: 15px; white-space: normal; overflow-wrap: anywhere; }
+  .agenda-cards :is(.post-time, .responsible, .visibility, .status, .format) { font-size: 12px; }
+  .agenda-cards .format { display: inline-flex; }
+  .agenda-empty { padding: 20px 0; }
+  .year-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; gap: 8px; padding: 8px; }
+  .mini-month { min-height: 44px; padding: 8px 4px; }
+  .mini-month > small { font-size: 12px; }
+  .mini-grid { font-size: 10px; gap: 0; }
+  .mini-grid .has-posts { text-decoration: underline; font-weight: 700; }
+  .mini-grid .outside { color: #71677c; }
+  dialog.filters-sheet { position: fixed; inset: auto 0 0; margin: 0 auto; width: min(640px, 100%); max-width: 100%; max-height: 90dvh; border-radius: 16px 16px 0 0; overscroll-behavior: contain; }
+  .filters-sheet .modal-body { padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+  .sheet-controls { display: grid; gap: 16px; }
+  .filters-sheet :is(select, .button) { min-height: 44px; min-width: 44px; font-size: 16px; }
+  .filters-sheet select { width: 100%; }
+}
+@media (640px <= width < 1024px) {
+  .year-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .mini-grid { font-size: 12px; }
+  .compact-mes .compact-day { min-height: 108px; padding: 8px 4px; }
+  .tablet-markers { display: grid; width: 100%; gap: 4px; text-align: left; }
+  .tablet-markers > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+  .agenda-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Bloque móvil 3: el tablero desplaza solo sus columnas en el eje horizontal. */
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.board-visibility { display: none; }
+@media (width < 1024px) {
+  .mini-month { display: grid; align-content: start; grid-template-rows: auto auto auto auto; }
+  .responsive-board { height: auto; min-height: 100%; min-width: 0; }
+  .responsive-board .calendar-surface { flex: none; overflow: visible; min-width: 0; }
+  .board-grid {
+    flex: none; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box;
+    grid-template-columns: none; grid-auto-flow: column;
+    grid-auto-columns: clamp(260px, 85%, 340px);
+    overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity; scroll-padding-inline: 12px; align-items: start;
+  }
+  .board-column { scroll-snap-align: start; scroll-snap-stop: normal; }
+  .board-column .column-scroll { overflow: visible; flex: none; }
+  .board-column header .status, .board-column header > span:last-child { font-size: 12px; }
+  .board-card { position: relative; cursor: pointer; }
+  .board-open { min-height: 44px; }
+  .board-open strong { height: auto; max-height: 4.5em; font-size: 14px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+  .board-card :is(.responsible, .post-time, .format, .status) { font-size: 12px; }
+  .board-card .post-time { flex-wrap: wrap; gap: 6px; }
+  .board-card .post-time > span:last-child { display: inline-flex; align-items: center; gap: 4px; }
+  .board-visibility { display: inline; }
+  .board-card .status-trigger { min-height: 44px; min-width: 44px; }
+  .board-grid:focus-visible, .board-card button:focus-visible { outline: 3px solid #bd6c16; outline-offset: -2px; }
+  .day-agenda > header { scroll-margin-top: 80px; }
+  .status-sheet .sheet-controls { gap: 8px; margin-bottom: 16px; }
+  .status-sheet .sheet-controls button { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; background: white; border: 1px solid #aaa4db; border-radius: 8px; font-size: 14px; }
+  .status-sheet .status { font-size: 14px; }
+  .status-sheet .modal-head h2 { overflow-wrap: anywhere; }
+}
+@media (640px <= width < 1024px) {
+  .board-grid { grid-auto-columns: calc((100% - 12px) / 2); }
+}
+
+/* Bloque móvil 4: el árbol y las reglas originales de escritorio se conservan. */
+.comment-shortcut, .comment-limit { display: none; }
+@media (max-width: 1023px) {
+  dialog.post-dialog[open] {
+    display: flex; flex-direction: column; position: fixed;
+    inset: var(--dialog-top, 0px) 0 auto; margin: 0 auto;
+    width: min(90%, 720px); max-width: 90%;
+    height: var(--dialog-height, 100dvh); max-height: var(--dialog-height, 100dvh);
+    overflow: hidden; overscroll-behavior: contain;
+  }
+  .post-dialog > .modal-head { flex: 0 0 auto; background: white; gap: 12px; padding: 16px; }
+  .post-dialog > .modal-body { min-height: 0; overflow-y: auto; padding: 16px; scroll-padding-block: 20px var(--footer-space, 150px); }
+  .post-dialog .modal-head h2 { min-width: 0; overflow-wrap: anywhere; }
+  .post-dialog :is(.button, .status-trigger, input, select, textarea) { min-height: 44px; min-width: 44px; }
+  .post-dialog :is(input, select, textarea) { font-size: 16px; max-width: 100%; }
+  .post-dialog textarea { min-height: 100px; }
+  .post-dialog .switch-label { min-height: 44px; }
+  .post-dialog .modal-head .button { flex-shrink: 0; }
+  .post-dialog form > .modal-actions, .post-dialog > .modal-body > .detail-actions {
+    position: sticky; bottom: -16px; z-index: 1; background: #fff;
+    border-top: 1px solid #d5d0df; box-shadow: 0 -4px 12px #29223912;
+    padding: 12px 0 calc(env(safe-area-inset-bottom) + 12px);
+  }
+  .post-detail-dialog > .modal-body { display: flex; flex-direction: column; }
+  .post-detail-dialog > .modal-body > .detail-actions { order: 1; flex-shrink: 0; }
+  .post-dialog .comment-shortcut { display: inline-flex; }
+  .post-dialog .comment-limit { display: block; font-size: 12px; }
+  .post-dialog.compact-footer form > .modal-actions,
+  .post-dialog.compact-footer > .modal-body > .detail-actions { position: static; }
+  .post-dialog.compact-footer > .modal-body { scroll-padding-bottom: 20px; }
+  .post-dialog :is(h3, p, dd, a, .comments strong, .attachments li) { min-width: 0; overflow-wrap: anywhere; }
+  .post-dialog dl { display: block; }
+  .post-dialog dt { margin-top: 12px; }
+  .post-dialog dd { margin: 4px 0 0; }
+  .post-dialog .comments time { font-size: 12px; }
+  .post-dialog .attachments { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .post-dialog .attachments img { width: 100%; }
+  .post-dialog .attachments li { min-width: 0; }
+  dialog.confirmation-sheet { max-height: min(90dvh, var(--dialog-height, 90dvh)); }
+  .confirmation-sheet .modal-head { gap: 12px; }
+  .confirmation-sheet .modal-head h2 { min-width: 0; overflow-wrap: anywhere; }
+  .confirmation-sheet .modal-head .button { flex-shrink: 0; }
+  .confirmation-sheet .modal-actions { flex-direction: column; }
+  .confirmation-sheet .modal-actions .button { width: 100%; min-height: 48px; }
+  .confirmation-sheet .destructive { background: #a5263c; border-color: #a5263c; color: white; }
+  .calendar-surface .notice { overflow-wrap: anywhere; }
+  .day-agenda > header { scroll-margin-top: 76px; }
+}
+@media (max-width: 639px) {
+  dialog.post-dialog[open] { width: 100%; max-width: 100%; border: 0; border-radius: 0; }
+  .post-dialog .form-grid { grid-template-columns: minmax(0, 1fr); }
+  .post-dialog .comments form > .button { width: 100%; }
+  .post-dialog .modal-actions { gap: 8px; }
+  .post-dialog .modal-actions .button { flex: 1; }
+}

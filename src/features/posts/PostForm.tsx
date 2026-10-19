@@ -58,7 +58,7 @@ export function PostForm({ companyId, day, post, onClose, onDeleted, onSaved }: 
   function error(key: keyof Draft) {
     return errors[key] && <span className="field-error" id={`error-${key}`}>{errors[key]}</span>;
   }
-  return <Modal title={post ? 'Editar publicación' : 'Nueva publicación'} side
+  return <Modal title={post ? 'Editar publicación' : 'Nueva publicación'} side adaptive className="post-dialog post-form-dialog"
     onClose={close} initialFocus="#post-title">
     <form ref={form} noValidate onSubmit={event => {
       event.preventDefault();
@@ -139,7 +139,7 @@ export function PostForm({ companyId, day, post, onClose, onDeleted, onSaved }: 
       </div>
     </form>
     {post && can(state.role, 'deletePost') && <DeletePost id={post.id} onDeleted={onDeleted ?? onClose} />}
-    {confirm && <Modal title="Descartar cambios sin guardar" onClose={() => setConfirm(false)}
+    {confirm && <Modal adaptive className="filters-sheet confirmation-sheet" title="Descartar cambios sin guardar" onClose={() => setConfirm(false)}
       initialFocus=".keep-editing">
       <p>Hay cambios sin guardar. ¿Quieres descartarlos?</p>
       <div className="modal-actions">

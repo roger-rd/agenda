@@ -1,4 +1,7 @@
 import { useEffect, useId, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { useDialogViewport } from '../lib/useDialogViewport';
+import { useDesktop } from '../lib/useDesktop';
+import { useSheetScrollLock } from '../lib/useSheetScrollLock';
 import { X, Image, Layers, Film, CirclePlay } from 'lucide-react';
 import type { PostFormat, PostStatus } from '../types';
 export function Button({ className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement>) { return <button className={`button ${className}`} {...props}/>; }
@@ -12,15 +15,20 @@ export function StatusBadge({ status }: {
 export function FormatBadge({ format }: {
     format: PostFormat;
 }) { const Icon = { Post: Image, Carrusel: Layers, Reel: Film, Historia: CirclePlay }[format]; return <span className="format"><Icon size={12}/>{format}</span>; }
-export function Modal({ title, onClose, children, side = false, initialFocus }: {
+export function Modal({ title, onClose, children, side = false, initialFocus, className, adaptive = false }: {
     title: string;
     onClose: () => void;
     children: ReactNode;
     side?: boolean;
     initialFocus?: string;
+    className?: string;
+    adaptive?: boolean;
 }) {
     const ref = useRef<HTMLDialogElement>(null);
     const titleId = useId();
+    const desktop = useDesktop();
+    useDialogViewport(ref, adaptive);
+    useSheetScrollLock(adaptive && !desktop);
     useEffect(() => {
         const previous = document.activeElement as HTMLElement;
         const dialog = ref.current;
@@ -33,7 +41,7 @@ export function Modal({ title, onClose, children, side = false, initialFocus }: 
         };
     }, [initialFocus]);
     return <dialog ref={ref} role="dialog" aria-modal="true"
-        className={side ? 'side-panel' : undefined}
+        className={[side ? 'side-panel' : '', className].filter(Boolean).join(' ') || undefined}
         aria-labelledby={titleId}
         onCancel={e => { e.preventDefault(); e.stopPropagation(); onClose(); }}
         onClick={e => {
