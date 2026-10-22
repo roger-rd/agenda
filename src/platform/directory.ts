@@ -1,7 +1,7 @@
 import type { Company, Organization, User } from '../types';
 import { LINKED_ORGANIZATION_ID } from './ids';
 import type { PlatformState } from './types';
-export interface WorkspaceDirectory { organization: Organization; companies: Company[]; users: User[] }
+export interface WorkspaceDirectory { organization: Organization; companies: Company[]; users: Omit<User, 'email'>[] }
 export function organizationDisplayName(state: PlatformState, workspace: WorkspaceDirectory, id: string) {
   const organization = state.organizations.find(o => o.id === id);
   return organization?.workspaceLinked && workspace.organization.id === id ? workspace.organization.name : organization?.name;
@@ -28,5 +28,5 @@ export function reconcileWithDirectory(state: PlatformState, workspaceUserIds: r
 
 // Lista explícita: no propaga el estado completo al almacén administrativo.
 export function workspaceDirectory({ organization, companies, users }: WorkspaceDirectory): WorkspaceDirectory {
-  return { organization, companies, users };
+  return { organization, companies, users: users.map(({ id, name, role, example }) => ({ id, name, role, example })) };
 }

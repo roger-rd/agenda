@@ -75,7 +75,7 @@ test('acciones públicas: CRUD, rechazos sin mutar, comentarios, metadatos y res
   assert.equal(getState().comments.some(c => c.postId === id), false);
   actions.setRole('community_manager');
   actions.reset();
-  assert.equal(getState().version, 2);
+  assert.equal(getState().version, 3);
   assert.equal(getState().posts.length, 261);
   assert.equal(getState().comments.length, 2);
 });

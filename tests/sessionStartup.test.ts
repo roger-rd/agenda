@@ -6,7 +6,7 @@ import { PLATFORM_ADMIN_ID } from '../src/platform/ids';
 
 test('arranque administrativo con marca compartida de trabajo: sin escrituras; conflicto posterior en memoria sigue cerrando ambas', async () => {
   const workspaceKey = 'agenda-demo-v2', platformKey = 'agenda-platform-v1', sessionKey = 'agenda-platform-session-v1';
-  const workspace = { ...generateDemo(), authenticated: true, role: 'worker' as const };
+  const workspace = { ...generateDemo(), authenticated: true, activeUserId: 'ana', role: 'worker' as const };
   const admin = { kind: 'platform_admin', adminId: PLATFORM_ADMIN_ID } as const;
   const shared = new Map([[workspaceKey, JSON.stringify(workspace)], [platformKey, JSON.stringify(generatePlatformSeed())]]);
   const tab = new Map([[sessionKey, JSON.stringify(admin)]]);

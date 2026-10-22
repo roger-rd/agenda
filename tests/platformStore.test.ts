@@ -1,3 +1,4 @@
+import './workspaceStorage';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createPlatformStore, PLATFORM_KEY } from '../src/platform/store';

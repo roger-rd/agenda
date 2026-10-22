@@ -33,3 +33,13 @@ export function accessCausesForWorkspace(state: PlatformState, organizationId: s
     organizationUnknown: !state.organizations.some(o => o.id === organizationId) };
 }
 export type WorkspaceAccessCauses = ReturnType<typeof accessCausesForWorkspace>;
+
+// Solo decisiones de lectura para invitaciones; no entrega motivos ni directorios privados.
+export function workspacePolicy(state: PlatformState) {
+  return {
+    organizationActive: (id: string) => state.organizations.some(o => o.id === id && o.status === 'active'),
+    emailExists: (email: string) => state.members.some(m => m.email.trim().toLowerCase() === email),
+    accessAllowed: (organizationId: string, userId: string) => accessForWorkspace(state, organizationId, userId).allowed,
+  };
+}
+export type WorkspacePolicy = ReturnType<typeof workspacePolicy>;

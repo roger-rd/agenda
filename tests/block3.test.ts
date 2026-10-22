@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { generateDemo as unauthenticatedDemo } from '../src/data/demo';
 import { acceptAttachments, toInput, validateDraft, type Draft } from '../src/features/posts/validation';
 import { addComment, deletePost, savePost, serializeState, setStatus, type Result } from '../src/store/operations';
-import { selectComments, selectPost } from '../src/store/selectors';
+import { profileIds, selectComments, selectPost } from '../src/store/selectors';
 import type { Attachment, State } from '../src/types';
 
 const generateDemo = () => ({ ...unauthenticatedDemo(), authenticated: true });
@@ -54,7 +54,7 @@ test('persistencia: adjuntos contienen exclusivamente metadatos', () => {
 });
 test('store: rechaza rol, empresas no asignadas y responsable ajeno sin mutación', () => {
   for (const role of ['community_manager', 'worker', 'client'] as const) {
-    const state = { ...generateDemo(), role };
+    const state = { ...generateDemo(), role, activeUserId: profileIds[role] };
     const before = JSON.stringify(state);
     const id = state.posts[0].id;
     const input = toInput(draft());
@@ -71,7 +71,7 @@ test('store: rechaza rol, empresas no asignadas y responsable ajeno sin mutació
     assert.equal(savePost(state, { ...input, responsibleId: 'roger' }, id).ok, false);
     assert.equal(JSON.stringify(state), before);
   }
-  const worker = { ...generateDemo(), role: 'worker' as const };
+  const worker = { ...generateDemo(), activeUserId: 'ana', role: 'worker' as const };
   const other = worker.posts.find(p => p.companyId === 'company-2')!;
   const input = { ...toInput(draft()), companyId: other.companyId, responsibleId: 'pablo' };
   for (const result of [savePost(worker, input), savePost(worker, input, other.id),
@@ -104,18 +104,18 @@ test('Subido: formulario, tablero y detalle comparten confirmación, conservaci�
 test('comentarios: acceso del cliente, ocultar conserva, eliminar borra y orden cronológico', () => {
   let state = generateDemo();
   const id = state.posts[0].id;
-  assert.equal(addComment({ ...state, role: 'client' }, id, 'Oculto').ok, false);
+  assert.equal(addComment({ ...state, activeUserId: 'roger', role: 'client' }, id, 'Oculto').ok, false);
   const other = state.posts.find(p => p.companyId === 'company-1' && p.visible_para_cliente)!;
-  assert.equal(addComment({ ...state, role: 'client' }, other.id, 'Otra empresa').ok, false);
+  assert.equal(addComment({ ...state, activeUserId: 'roger', role: 'client' }, other.id, 'Otra empresa').ok, false);
   assert.equal(addComment(state, id, ' ').ok, false);
   assert.equal(addComment(state, id, 'a'.repeat(2001)).ok, false);
   state = next(savePost(state, { ...toInput(draft()), visible_para_cliente: true }, id));
-  state = next(addComment({ ...state, role: 'client' }, id, 'Cliente', new Date('2026-10-17T16:00:00Z')));
-  state = next(addComment({ ...state, role: 'worker' }, id, 'Equipo', new Date('2026-10-17T15:00:00Z')));
+  state = next(addComment({ ...state, activeUserId: 'roger', role: 'client' }, id, 'Cliente', new Date('2026-10-17T16:00:00Z')));
+  state = next(addComment({ ...state, activeUserId: 'ana', role: 'worker' }, id, 'Equipo', new Date('2026-10-17T15:00:00Z')));
   assert.deepEqual(selectComments(state, id).map(c => c.body), ['Equipo', 'Cliente']);
   state = next(savePost(state, toInput(draft()), id));
-  assert.equal(selectComments({ ...state, role: 'client' }, id).length, 0);
-  assert.equal(addComment({ ...state, role: 'client' }, id, 'No autorizado').ok, false);
+  assert.equal(selectComments({ ...state, activeUserId: 'roger', role: 'client' }, id).length, 0);
+  assert.equal(addComment({ ...state, activeUserId: 'roger', role: 'client' }, id, 'No autorizado').ok, false);
   assert.equal(state.comments.filter(c => c.postId === id).length, 2);
   state = next(deletePost(state, id));
   assert.equal(state.comments.filter(c => c.postId === id).length, 0);

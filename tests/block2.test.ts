@@ -4,7 +4,7 @@ import { generateDemo } from '../src/data/demo';
 import { santiagoInstant, zonedFormat } from '../src/lib/dates';
 import { dateKey, movePeriod, periodDays, periodRange, readPeriod, resolveView } from '../src/lib/periods';
 import { can } from '../src/store/permissions';
-import { emptyFilters, selectCompanies, selectCounts, selectPost, selectViewPosts } from '../src/store/selectors';
+import { profileIds, emptyFilters, selectCompanies, selectCounts, selectPost, selectViewPosts } from '../src/store/selectors';
 import { changePostStatus } from '../src/store/transitions';
 import type { Post, Role } from '../src/types';
 
@@ -29,16 +29,16 @@ test('contadores mensuales: empresa, Santiago, estado y visibilidad', () => {
   const state = fixture();
   const now = new Date('2026-02-01T01:00:00Z'); // Aún enero en Santiago.
   assert.deepEqual(selectCounts(state, 'company-0', now), { planned: 3, pending: 2 });
-  assert.deepEqual(selectCounts({ ...state, role: 'client' }, 'company-0', now), { planned: 2, pending: 1 });
-  const worker = { ...state, role: 'worker' as const };
+  assert.deepEqual(selectCounts({ ...state, activeUserId: 'roger', role: 'client' }, 'company-0', now), { planned: 2, pending: 1 });
+  const worker = { ...state, activeUserId: 'ana', role: 'worker' as const };
   assert.deepEqual(selectCompanies(worker).map(c => c.id), ['company-0', 'company-1']);
   assert.deepEqual(selectCounts(worker, 'company-0', now), { planned: 3, pending: 2 });
   assert.deepEqual(selectCounts(worker, 'company-2', now), { planned: 0, pending: 0 });
-  assert.deepEqual(selectCounts({ ...state, role: 'client' }, 'company-2', now), { planned: 0, pending: 0 });
+  assert.deepEqual(selectCounts({ ...state, activeUserId: 'roger', role: 'client' }, 'company-2', now), { planned: 0, pending: 0 });
   assert.deepEqual(selectCounts(state, 'company-0', new Date(santiagoInstant('2026-02-01', '12:00'))), { planned: 1, pending: 1 });
 });
 test('cliente: Año, Mes y Semana comparten aislamiento; tablero inaccesible', () => {
-  const state = { ...fixture(), role: 'client' as const };
+  const state = { ...fixture(), activeUserId: 'roger', role: 'client' as const };
   for (const view of ['anio', 'mes', 'semana'] as const) {
     const posts = selectViewPosts(state, 'company-0', emptyFilters, '2026-01-01', view);
     assert.ok(posts.length > 0);
@@ -55,7 +55,7 @@ test('cliente: Año, Mes y Semana comparten aislamiento; tablero inaccesible', (
 });
 test('changeStatus: permisos, confirmación, limpieza e idempotencia', () => {
   for (const role of ['community_manager', 'worker', 'client'] as Role[]) {
-    const state = { ...fixture(), role };
+    const state = { ...fixture(), role, activeUserId: profileIds[role] };
     const allowed = role !== 'client';
     assert.equal(can(role, 'changeStatus'), allowed);
     const now = new Date('2026-01-04T16:00:00Z');
@@ -73,7 +73,7 @@ test('changeStatus: permisos, confirmación, limpieza e idempotencia', () => {
       assert.equal(selectViewPosts(uploaded, 'company-0', { ...emptyFilters, status: 'Subido' }, '2026-01-01', view)[0]?.id, 'jan');
     }
   }
-  const worker = { ...fixture(), role: 'worker' as const };
+  const worker = { ...fixture(), activeUserId: 'ana', role: 'worker' as const };
   assert.equal(changePostStatus(worker, 'other', 'Subido'), worker);
   assert.equal(changePostStatus(worker, 'missing', 'Subido'), worker);
   assert.equal(can('worker', 'createCompany'), false);

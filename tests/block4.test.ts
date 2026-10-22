@@ -1,3 +1,4 @@
+import './workspaceStorage';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateDemo } from '../src/data/demo';
@@ -49,7 +50,7 @@ test('adjuntos: quitar conserva todos los campos, límite incluye existentes y U
 
 test('URL: tres roles, empresa inexistente/ajena, publicación oculta/ajena y parámetros inválidos', () => {
   for (const role of ['community_manager', 'worker', 'client'] as const) {
-    const s = { ...generateDemo(), role };
+    const s = { ...generateDemo(), role, activeUserId: { community_manager: 'edison', worker: 'ana', client: 'roger' }[role] };
     assert.equal(selectCompany(s, 'missing'), undefined);
     assert.equal(selectRequestedPost(s, 'company-0', 'missing'), undefined);
     assert.equal(selectRequestedPost(s, 'company-1', s.posts[0].id), undefined);

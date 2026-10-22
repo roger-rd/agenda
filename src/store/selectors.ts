@@ -4,14 +4,14 @@ import { can } from './permissions';
 import { zonedFormat } from '../lib/dates';
 import { dateKey, periodRange, type View } from '../lib/periods';
 
-const profileIds = { community_manager: WORKSPACE_USER_IDS.manager, worker: WORKSPACE_USER_IDS.worker, client: WORKSPACE_USER_IDS.client };
+export const profileIds = { community_manager: WORKSPACE_USER_IDS.manager, worker: WORKSPACE_USER_IDS.worker, client: WORKSPACE_USER_IDS.client };
 // El selector de demo cambia la identidad simulada y su acceso individual.
-export const currentUserId = (s: State) => profileIds[s.role];
+export const currentUserId = (s: State) => s.activeUserId;
 export const workspaceOrganizationId = (s: State) => s.organization.id;
 export const selectUser = (s: State) => s.users.find(u => u.id === currentUserId(s))!;
 export const selectCompanies = (s: State) => s.companies.filter(c =>
   c.organizationId === s.organization.id && (can(s.role, 'viewAllCompanies')
-    || s.memberships.some(m => m.companyId === c.id && m.userId === selectUser(s).id)));
+    || s.memberships.some(m => m.companyId === c.id && m.userId === currentUserId(s))));
 export const selectCompany = (s: State, id: string) => selectCompanies(s).find(c => c.id === id);
 export const selectPosts = (s: State, companyId: string) => selectCompany(s, companyId)
   ? s.posts.filter(p => p.companyId === companyId && (can(s.role, 'viewHiddenPosts') || p.visible_para_cliente)) : [];
@@ -53,3 +53,9 @@ export function selectRequestedPost(s: State, companyId: string, id: string) {
   const post = selectPost(s, id);
   return post?.companyId === companyId ? post : undefined;
 }
+
+export const isResponsibleAuthorized = (s: State, companyId: string, responsibleId: string) =>
+  selectAssignableUsers(s, companyId).some(u => u.id === responsibleId);
+export const selectPostsWithUnauthorizedResponsible = (s: State, companyId: string) =>
+  selectPosts(s, companyId).filter(p => !isResponsibleAuthorized(s, companyId, p.responsibleId))
+    .map(post => ({ post, previousResponsible: s.users.find(u => u.id === post.responsibleId) }));

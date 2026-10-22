@@ -22,7 +22,7 @@ class Storage {
 test('identidad simulada, directorio e ids estables al regenerar', () => {
   const s = generateDemo();
   for (const [role, id, name] of [['community_manager', 'edison', 'Edison Valera'], ['worker', 'ana', 'Ana Torres'], ['client', 'roger', 'Roger Rodríguez']] as const) {
-    const state = { ...s, role };
+    const state = { ...s, role, activeUserId: id };
     assert.equal(currentUserId(state), id); assert.equal(selectUser(state).name, name);
   }
   assert.equal(workspaceOrganizationId(s), linked);
@@ -53,7 +53,7 @@ test('dos pestañas: gate, guarda fresca sin evento, reactivación parcial y aus
   const storage = new Storage(), windowTarget = new EventTarget(), documentTarget = new EventTarget();
   const a = createPlatformStore(storage, { getSession: () => admin });
   const b = createPlatformStore(storage, { getSession: () => null, windowTarget, documentTarget });
-  const workspace = { ...generateDemo(), authenticated: true, role: 'worker' as const };
+  const workspace = { ...generateDemo(), authenticated: true, activeUserId: 'ana', role: 'worker' as const };
   const before = JSON.stringify(workspace);
   const guard = createAccessGuard({ getWorkspaceState: () => workspace, isAccessAllowed: b.isAccessAllowed });
   const gate = () => resolveWorkspaceGate('workspace', accessCausesForWorkspace(b.getState(), linked, 'ana')).access;

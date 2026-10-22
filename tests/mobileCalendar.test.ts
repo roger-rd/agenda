@@ -47,7 +47,7 @@ test('indicadores autorizados: cliente excluye ocultas y otra empresa; filtros e
     { ...base, id: 'otra', companyId: 'company-2', visible_para_cliente: true },
   ];
   assert.equal(dailyCounts(selectFilteredPosts(state, 'company-0', emptyFilters)).get('2026-10-14'), 2);
-  state.role = 'client';
+  state.role = 'client'; state.activeUserId = 'roger';
   assert.equal(dailyCounts(selectFilteredPosts(state, 'company-0', emptyFilters)).get('2026-10-14'), 1);
   assert.equal(dailyCounts(selectFilteredPosts(state, 'company-2', emptyFilters)).size, 0);
   assert.equal(dailyCounts(selectFilteredPosts(state, 'company-0', { ...emptyFilters, status: 'Subido' })).size, 0);

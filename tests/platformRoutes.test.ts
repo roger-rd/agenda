@@ -1,3 +1,4 @@
+import './workspaceStorage';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveRoute } from '../src/auth/routeGuard';

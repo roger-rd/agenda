@@ -56,7 +56,7 @@ test('todas las escrituras públicas bloqueadas sin mutación; sesiones, cambio 
     assert.equal(actions.reset().ok, true); // Edison permitido, Ana continúa suspendida.
     assert.equal(JSON.stringify(a.getState()), platformBefore);
     assert.equal(data.get(PLATFORM_KEY), persisted);
-    assert.ok(keys.slice(cursor).every(key => key === 'agenda-demo-v2'));
+    assert.ok(keys.slice(cursor).every(key => ['agenda-demo-v2', 'agenda-demo-v2:lock'].includes(key)));
     platformStore.reconcileWithWorkspace(getState().users.map(user => user.id));
     assert.deepEqual(platformStore.getState(), JSON.parse(platformBefore));
     assert.ok(platformStore.getState().memberAccess.filter(access => access.organizationId === linked).every(access => getState().users.some(user => user.id === access.userId)));

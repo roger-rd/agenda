@@ -5,7 +5,7 @@ import { changePostStatus, transitionPost, statuses } from './transitions';
 import { metadata, validateDraft, type PostInput } from '../features/posts/validation';
 import { zonedFormat } from '../lib/dates';
 
-export type Result = { ok: true; state: State } | { ok: false; reason: string };
+export type Result = { ok: true; state: State } | { ok: false; reason: string; code?: WorkspaceError };
 const reject = (reason: string): Result => ({ ok: false, reason });
 function authorized(s: State, action: Action, companyId: string) {
   return s.authenticated && can(s.role, action) && !!selectCompany(s, companyId);
@@ -70,3 +70,7 @@ export function serializeState(s: State): string {
     ...p, attachments: p.attachments.map(metadata),
   })) });
 }
+
+export type WorkspaceError = 'conflict' | 'storage_unavailable' | 'forbidden' | 'invalid_input' |
+  'not_found' | 'used' | 'revoked' | 'expired' | 'organization_unavailable' |
+  'invalid_companies' | 'session_active' | 'existing_member' | 'duplicate_email';

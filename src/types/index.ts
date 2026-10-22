@@ -16,6 +16,7 @@ export interface User {
     name: string;
     role: Role;
     example: boolean;
+    email?: string;
 }
 export interface Membership {
     id: string;
@@ -51,7 +52,10 @@ export interface Post {
     confirmadoEn?: string;
 }
 export interface State {
-    version: 2;
+    version: 3;
+    revision: number;
+    activeUserId: string;
+    invitations: Invitation[];
     comments: Comment[];
     organization: Organization;
     companies: Company[];
@@ -61,4 +65,19 @@ export interface State {
     role: Role;
     authenticated: boolean;
     activeCompanyId: string;
+}
+
+export interface Invitation {
+    id: string;
+    code: string;
+    organizationId: string;
+    email: string;
+    role: 'worker' | 'client';
+    companyIds: string[];
+    validityDays: 1 | 7 | 30;
+    createdAt: string;
+    expiresAt: string;
+    usedAt?: string;
+    usedBy?: string;
+    revokedAt?: string;
 }
