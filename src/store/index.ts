@@ -1,3 +1,6 @@
+import { platformStore } from '../platform/store';
+import { createAccessGuard, ACCESS_DENIED } from './accessGuard';
+import { adminSession } from '../platform/session';
 import { useSyncExternalStore } from 'react';
 import type { PostStatus, Role, State } from '../types';
 import { generateDemo } from '../data/demo';
@@ -18,8 +21,12 @@ function restore(): State {
         && Array.isArray(s.companies)
         && Array.isArray(s.users)
         && Array.isArray(s.memberships)
-        && ['community_manager', 'worker', 'client'].includes(s.role))
-        return s;
+        && ['community_manager', 'worker', 'client'].includes(s.role)) {
+        // La marca persistida es compartida y puede proceder de otra pestaña.
+        // Al arrancar con administrador local, neutralizarla solo en memoria:
+        // no cerrar sesiones ni escribir almacenamiento durante la restauración.
+        return adminSession.getSession() ? { ...s, authenticated: false } : s;
+      }
     }
   }
   catch { /* Storage can be unavailable. */ }
@@ -50,24 +57,43 @@ function apply(result: Result): Result {
   }
   return result;
 }
+export function updateWorkspaceSession(authenticated: boolean) {
+  if (authenticated) { platformStore.refresh(); adminSession.setSession(null); }
+  update({ ...state, authenticated, role: 'community_manager' });
+}
+const unauthenticated = (): Result => ({ ok: false, reason: 'Debes iniciar sesión en el espacio de trabajo.' });
+const accessAllowed = createAccessGuard({ getWorkspaceState: getState, isAccessAllowed: platformStore.isAccessAllowed });
+const blocked = (): Result => ({ ok: false, reason: ACCESS_DENIED });
+function guarded(operation: () => Result): Result {
+  return accessAllowed() ? apply(operation()) : blocked();
+}
 export const actions = {
-  createPost: (input: PostInput) => apply(savePost(state, input)),
-  updatePost: (id: string, input: PostInput) => apply(savePost(state, input, id)),
-  deletePost: (id: string) => apply(deletePost(state, id)),
-  addComment: (id: string, body: string) => apply(addComment(state, id, body)),
-  changeStatus: (id: string, status: PostStatus) => apply(setStatus(state, id, status)),
-  login: () => update({ ...state, authenticated: true, role: 'community_manager' }),
-  logout: () => update({ ...state, authenticated: false }),
-  setRole: (role: Role) => {
+  createPost: (input: PostInput) => guarded(() => savePost(state, input)),
+  updatePost: (id: string, input: PostInput) => guarded(() => savePost(state, input, id)),
+  deletePost: (id: string) => guarded(() => deletePost(state, id)),
+  addComment: (id: string, body: string) => guarded(() => addComment(state, id, body)),
+  changeStatus: (id: string, status: PostStatus) => guarded(() => setStatus(state, id, status)),
+  login: () => updateWorkspaceSession(true),
+  logout: () => updateWorkspaceSession(false),
+  setRole: (role: Role): Result => {
+    platformStore.refresh();
+    if (!state.authenticated) return unauthenticated();
+    if (!['community_manager', 'worker', 'client'].includes(role)) return { ok: false, reason: 'Perfil no válido.' };
     const next = { ...state, role };
     next.activeCompanyId = selectCompanies(next)[0]?.id ?? '';
     update(next);
+    return { ok: true, state };
   },
-  setCompany: (id: string) => {
+  setCompany: (id: string): Result => {
+    if (!accessAllowed()) return blocked();
+    if (!state.authenticated) return unauthenticated();
     if (selectCompanies(state).some(c => c.id === id))
       update({ ...state, activeCompanyId: id });
+    return { ok: true, state };
   },
   createCompany: (name: string, color: string) => {
+    if (!accessAllowed()) return blocked();
+    if (!state.authenticated) return unauthenticated();
     if (!can(state.role, 'createCompany') || !name.trim())
       return { ok: false, reason: 'No tienes permiso o el nombre de empresa no es válido.' } as const;
     const id = crypto.randomUUID();
@@ -75,10 +101,15 @@ export const actions = {
     update({ ...state, companies: [...state.companies, company] });
     return { ok: true, state } as const;
   },
-  reset: () => {
+  reset: (): Result => {
+    if (!accessAllowed()) return blocked();
+    if (!state.authenticated) return unauthenticated();
     if (can(state.role, 'resetDemo')) {
       attachmentFiles.clear();
+      // Vaciar el navegador restablece toda la demo; en producción autoriza el servidor.
       update({ ...generateDemo(), authenticated: true });
+      return { ok: true, state };
     }
+    return { ok: false, reason: 'No tienes permiso para restablecer la demostración.' };
   },
 };

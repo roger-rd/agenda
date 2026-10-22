@@ -14,7 +14,7 @@ export function transitionPost(previous: Post | undefined, next: Post, userId: s
 }
 export function changePostStatus(state: State, id: string, status: PostStatus, now = new Date()): State {
   const post = selectPost(state, id);
-  if (!can(state.role, 'changeStatus') || !post || !statuses.includes(status)
+  if (!state.authenticated || !can(state.role, 'changeStatus') || !post || !statuses.includes(status)
     || !selectAssignableUsers(state, post.companyId).some(u => u.id === post.responsibleId)
     || post.status === status) return state;
   return { ...state, posts: state.posts.map(p => p.id === id

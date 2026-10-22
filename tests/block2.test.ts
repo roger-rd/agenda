@@ -9,7 +9,7 @@ import { changePostStatus } from '../src/store/transitions';
 import type { Post, Role } from '../src/types';
 
 function fixture() {
-  const state = generateDemo();
+  const state = { ...generateDemo(), authenticated: true };
   const base = state.posts[0];
   const post = (id: string, day: string, status: Post['status'], visible = true): Post => ({
     ...base, id, scheduledAt: santiagoInstant(day, '23:30'), status,

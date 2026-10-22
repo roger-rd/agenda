@@ -1,7 +1,8 @@
+import { ACCESS_RESTORED } from '../access/accessMessages';
 import { useNavigationDrawer } from './useNavigationDrawer';
-import { trappedFocusIndex } from '../../lib/responsive';
 import { ProfileMenu } from './ProfileMenu';
-import { useState } from 'react';
+import { restorePendingWorkspaceFocus } from '../../lib/recoveryFocus';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useMatch } from 'react-router';
 import { CalendarDays, Building2, ChevronDown, Menu, X } from 'lucide-react';
 import { actions, getStorageWarning, useStore } from '../../store';
@@ -13,8 +14,16 @@ import { Avatar, Button, Modal } from '../../components/ui';
 import { Companies } from '../companies/Companies';
 import { Calendar } from '../calendar/Calendar';
 function CompanyRoute() { const { id = '' } = useParams(); return <Calendar key={id} companyId={id} />; }
-export function Workspace() {
-  const { open, show, close: closeMenu, drawer, background } = useNavigationDrawer();
+export function Workspace({ accessRestored = false, focusAfterBlock = false }: { accessRestored?: boolean; focusAfterBlock?: boolean }) {
+  const main = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    if (!focusAfterBlock || !main.current) return;
+    main.current.dataset.recoveryFocus = '';
+    const frame = requestAnimationFrame(restorePendingWorkspaceFocus);
+    return () => cancelAnimationFrame(frame);
+  }, [focusAfterBlock]);
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
+  const { open, show, close: closeMenu, drawer, background, onKeyDown } = useNavigationDrawer();
   const s = useStore();
   const navigate = useNavigate();
   const companies = selectCompanies(s);
@@ -28,16 +37,7 @@ export function Workspace() {
     <aside id="navigation-menu" ref={drawer} tabIndex={-1} className={`sidebar ${open ? 'drawer-open' : ''}`}
       role={open ? 'dialog' : undefined} aria-modal={open ? true : undefined}
       aria-label={open ? 'Menú de navegación' : undefined}
-      onKeyDown={e => {
-        if (!open) return;
-        if (e.key === 'Escape') { e.preventDefault(); closeMenu(); }
-        if (e.key !== 'Tab') return;
-        const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), select:not(:disabled), a[href]'
-        )).filter(item => item.getClientRects().length);
-        const next = trappedFocusIndex(items.indexOf(document.activeElement as HTMLElement), items.length, e.shiftKey);
-        if (next !== null) { e.preventDefault(); items[next].focus(); }
-      }}>
+      onKeyDown={onKeyDown}>
       <Button className="drawer-close" aria-label="Cerrar menú" onClick={closeMenu}><X size={20} />Cerrar menú</Button>
       <Link className="brand" to={home} onClick={closeMenu}>
         <span className="brand-mark">
@@ -82,7 +82,10 @@ export function Workspace() {
           <span className="workspace-dot" style={{ background: active?.color }} />{active?.name}</div>
         <span>{zonedFormat(new Date(), 'MMMM yyyy')}<span className="demo-tag">Demostración</span>
         </span>
-      </header>{getStorageWarning() && <p role="alert" className="notice">{getStorageWarning()}</p>}<main className="main-content" tabIndex={-1}>
+      </header>{getStorageWarning() && <p role="alert" className="notice">{getStorageWarning()}</p>}<main ref={main} className="main-content" tabIndex={-1}>
+        {accessRestored && !noticeDismissed && <div className="notice access-restored" data-recovery-notice tabIndex={-1} role="status" aria-live="polite">
+          <p>{ACCESS_RESTORED}</p><Button onClick={() => { setNoticeDismissed(true); main.current?.focus({ preventScroll: true }); }}>Entendido</Button>
+        </div>}
         <Routes>
           <Route path="/empresas" element={panel ? <Companies /> : <Navigate to={home} replace />} />
           <Route path="/empresa/:id" element={<CompanyRoute />} />

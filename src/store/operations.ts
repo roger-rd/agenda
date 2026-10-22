@@ -8,7 +8,7 @@ import { zonedFormat } from '../lib/dates';
 export type Result = { ok: true; state: State } | { ok: false; reason: string };
 const reject = (reason: string): Result => ({ ok: false, reason });
 function authorized(s: State, action: Action, companyId: string) {
-  return can(s.role, action) && !!selectCompany(s, companyId);
+  return s.authenticated && can(s.role, action) && !!selectCompany(s, companyId);
 }
 function validate(s: State, input: PostInput): string | undefined {
   try {
@@ -19,6 +19,7 @@ function validate(s: State, input: PostInput): string | undefined {
   } catch { return 'La fecha y hora no son válidas.'; }
 }
 export function savePost(s: State, input: PostInput, id?: string, now = new Date()): Result {
+  if (!s.authenticated) return reject('Debes iniciar sesión en el espacio de trabajo.');
   const previous = id ? selectPost(s, id) : undefined;
   if (!authorized(s, id ? 'editPost' : 'createPost', input.companyId)
     || (id && (!previous || previous.companyId !== input.companyId)))
@@ -32,6 +33,7 @@ export function savePost(s: State, input: PostInput, id?: string, now = new Date
     ? s.posts.map(p => p.id === id ? post : p) : [...s.posts, post] } };
 }
 export function deletePost(s: State, id: string): Result {
+  if (!s.authenticated) return reject('Debes iniciar sesión en el espacio de trabajo.');
   const post = selectPost(s, id);
   if (!post || !authorized(s, 'deletePost', post.companyId))
     return reject('No tienes permiso para eliminar esta publicación.');
@@ -41,6 +43,7 @@ export function deletePost(s: State, id: string): Result {
     comments: s.comments.filter(c => c.postId !== id) } };
 }
 export function setStatus(s: State, id: string, status: PostStatus, now = new Date()): Result {
+  if (!s.authenticated) return reject('Debes iniciar sesión en el espacio de trabajo.');
   const post = selectPost(s, id);
   if (!post || !authorized(s, 'changeStatus', post.companyId))
     return reject('No tienes permiso para cambiar el estado.');
@@ -50,6 +53,7 @@ export function setStatus(s: State, id: string, status: PostStatus, now = new Da
   return { ok: true, state: changePostStatus(s, id, status, now) };
 }
 export function addComment(s: State, postId: string, body: string, now = new Date()): Result {
+  if (!s.authenticated) return reject('Debes iniciar sesión en el espacio de trabajo.');
   const post = selectPost(s, postId);
   if (!post || !authorized(s, 'comment', post.companyId))
     return reject('No tienes permiso para comentar esta publicación.');

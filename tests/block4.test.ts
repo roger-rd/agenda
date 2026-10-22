@@ -63,7 +63,7 @@ test('URL: tres roles, empresa inexistente/ajena, publicación oculta/ajena y pa
 
 test('acciones públicas deniegan operaciones sin mutar y devuelven error controlado', async () => {
   const { actions, getState } = await import('../src/store');
-  actions.setRole('community_manager'); actions.reset();
+  actions.login(); actions.setRole('community_manager'); actions.reset();
   const input = toInput(draft());
   const own = getState().posts[0];
   const other = getState().posts.find(p => p.companyId === 'company-2')!;
@@ -96,7 +96,7 @@ test('acciones públicas deniegan operaciones sin mutar y devuelven error contro
 
 test('CRUD con filtros activos sincroniza vistas y contadores sin mutar filtros ni periodo', async () => {
   const { actions, getState } = await import('../src/store');
-  actions.setRole('community_manager'); actions.reset();
+  actions.login(); actions.setRole('community_manager'); actions.reset();
   const reference = '2040-10-17';
   const filters = Object.freeze({ ...emptyFilters, status: 'Pendiente' as const, responsible: 'ana', format: 'Post' as const });
   const input = toInput({ ...draft(), day: reference });

@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateDemo } from '../src/data/demo';
+import { generateDemo as unauthenticatedDemo } from '../src/data/demo';
 import { acceptAttachments, toInput, validateDraft, type Draft } from '../src/features/posts/validation';
 import { addComment, deletePost, savePost, serializeState, setStatus, type Result } from '../src/store/operations';
 import { selectComments, selectPost } from '../src/store/selectors';
 import type { Attachment, State } from '../src/types';
 
+const generateDemo = () => ({ ...unauthenticatedDemo(), authenticated: true });
 const draft = (): Draft => ({
   companyId: 'company-0', title: 'Nueva idea', description: '', day: '2026-10-17',
   time: '10:00', format: 'Post', status: 'Pendiente', responsibleId: 'ana',

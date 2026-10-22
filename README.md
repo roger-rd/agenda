@@ -44,12 +44,16 @@ Las dependencias ya estaban instaladas; el Bloque 2 no añade dependencias. `pac
 
 `features/calendar` contiene el coordinador, filtros, tarjetas, detalle y las carpetas `MonthView`, `WeekView`, `YearView`. `features/board` contiene tablero y control de estado. Las tarjetas de empresa y el menú de perfil están separados de sus vistas. `lib/periods.ts` concentra los cálculos de periodo y `store/transitions.ts` las transiciones autorizadas.
 
+## Cómo leer las notas de verificación
+
+Las frases «pendiente», «no hay herramienta de navegador disponible», «EPERM» o «código 134» dentro de los inventarios por bloque describen lo que Codex pudo ejecutar en su entorno de trabajo en ese momento: un sandbox sin navegador disponible y sin poder abrir Vite. No significan que el producto no se verificara después. Claude realizó posteriormente, de forma separada y con el servidor local, la verificación en navegador de escritorio emulado de cada bloque. Sus resultados se resumen en las secciones «Comprobado en navegador…»: para el panel, en [Panel de administración: estado final, limitaciones y pruebas manuales pendientes](#panel-de-administración-estado-final-limitaciones-y-pruebas-manuales-pendientes), y para la adaptación móvil, en [Etapa móvil/tablet: verificación en navegador de escritorio emulado](#etapa-móviltablet-verificación-en-navegador-de-escritorio-emulado). Lo comprobado en navegador emulado no sustituye las pruebas en dispositivos reales, que siguen listadas como pendientes.
+
 ## Verificación del Bloque 2
 
 - `npm run lint`: sin errores ni warnings.
 - `npm test`: 12 pruebas aprobadas, incluyendo contadores mensuales, aislamiento por perfil, permisos, confirmaciones, filtros, navegación, años bisiestos y semanas que cruzan mes/año o cambios de horario.
 - `npm run build`: TypeScript y Vite correctos.
-- Layout con columnas `minmax(0, 1fr)`, controles que se ajustan y scroll interno. No se pudo verificar visualmente a 1440×900 y 1280×800: no hay navegador automatizado disponible en esta sesión.
+- Layout con columnas `minmax(0, 1fr)`, controles que se ajustan y scroll interno. No se pudo verificar visualmente a 1440×900 y 1280×800: no hay navegador automatizado disponible en esta sesión. Ver [«Cómo leer las notas de verificación»](#cómo-leer-las-notas-de-verificación).
 
 Revisión manual pendiente: navegar entre vistas con filtros activos, abrir día/mes/detalle, cambiar estado desde tablero y detalle, recargar URL, comprobar foco y ausencia de scroll horizontal en ambas resoluciones. No se dejó ningún servidor activo.
 
@@ -70,17 +74,17 @@ Revisión manual pendiente: navegar entre vistas con filtros activos, abrir día
 - `npm run lint`: 0 errores y 0 warnings.
 - `npm test`: 23 pruebas aprobadas, incluidas validaciones, límites de adjuntos, serialización, permisos, acciones públicas, confirmaciones y comentarios.
 - `npm run build`: TypeScript y Vite correctos.
-- Revisión de código de foco y layout para 1440×900 y 1280×800; verificación real en navegador pendiente. El sandbox impide abrir Vite (`listen EPERM 127.0.0.1:5173`) y Chrome headless termina sin arrancar. No se dejaron servidores activos.
+- Revisión de código de foco y layout para 1440×900 y 1280×800; verificación real en navegador pendiente. El sandbox impide abrir Vite (`listen EPERM 127.0.0.1:5173`) y Chrome headless termina sin arrancar. No se dejaron servidores activos. Ver [«Cómo leer las notas de verificación»](#cómo-leer-las-notas-de-verificación).
 - Se mantiene la limitación de seguridad propia de una demostración local sin backend.
 
 
 ## Limitaciones del prototipo
 
 - Autenticación, permisos y visibilidad son una **demostración local**, no una barrera de seguridad. El servidor futuro deberá autenticar y autorizar cada lectura y escritura.
-- Los perfiles son fijos y pertenecen a una sola organización. No existe administración de accesos ni una acción pública para cambiar membresías; no se implementó en este bloque.
+- Los perfiles de trabajo son fijos y pertenecen a una sola organización. El panel de plataforma administra suspensiones locales; no existe una acción pública para cambiar membresías.
 - Las imágenes no se suben ni persisten: los archivos viven en memoria y desaparecen al recargar. Solo se conservan metadatos en localStorage. Las URL de vista previa se revocan al quitar/desmontar cada imagen.
 - No hay backend, sincronización entre personas ni garantía de conservación si se borra el almacenamiento del navegador.
-- La comprobación visual y de teclado real a 1440×900 y 1280×800 sigue pendiente: Vite termina con `listen EPERM` y Chrome headless termina con código 134 en este entorno.
+- La comprobación visual y de teclado real a 1440×900 y 1280×800 sigue pendiente: Vite termina con `listen EPERM` y Chrome headless termina con código 134 en este entorno. Ver [«Cómo leer las notas de verificación»](#cómo-leer-las-notas-de-verificación).
 
 ## Bloque 4: cierre y revisión
 
@@ -106,7 +110,7 @@ Revisión manual pendiente: navegar entre vistas con filtros activos, abrir día
 
 Lint sin errores ni warnings, 30 pruebas aprobadas y build TypeScript/Vite correcto. Las dos pruebas nuevas cubren límites y cálculo del ciclo de foco; no se añadieron dependencias ni un DOM de pruebas.
 
-Verificación visual/manual **pendiente**, no ejecutada: el intento de Vite falla con `listen EPERM 127.0.0.1:5173` y Chrome headless sale con código 134. No queda servidor activo. La revisión estática de reglas de escritorio no equivale a una comparación visual.
+Verificación visual/manual **pendiente**, no ejecutada: el intento de Vite falla con `listen EPERM 127.0.0.1:5173` y Chrome headless sale con código 134. No queda servidor activo. La revisión estática de reglas de escritorio no equivale a una comparación visual. Ver [«Cómo leer las notas de verificación»](#cómo-leer-las-notas-de-verificación).
 
 Protocolo pendiente en navegador:
 
@@ -116,7 +120,7 @@ Protocolo pendiente en navegador:
 4. Con filtros y URL `?vista=semana&fecha=2026-12-31&dia=2026-12-31&publicacion=ID_VALIDO`, rotar/redimensionar 390→844→1280→390: comprobar URL, filtros, detalle, rol y empresa sin cambios. Repetir con búsqueda de empresas y borrador de empresa.
 5. Comparar escritorio a 1440×900 y 1280×800 con la versión previa; comprobar también sidebar a 1100 px. Activar movimiento reducido y revisar navegación sin transición.
 
-El contenido interno de Año/Mes/Semana/Tablero, filtros de calendario, editor, detalle y comentarios queda para los bloques siguientes y puede seguir apretado en móvil.
+La adaptación del contenido interno de calendarios, filtros, editor, detalle y comentarios se describe en los Bloques 2–4 siguientes.
 
 ### Corrección de los defectos observados en navegador · Bloque 1
 
@@ -130,7 +134,7 @@ La revisión del usuario a 390/768/1440/1280 px detectó desborde de cabecera y 
 
 Comprobaciones posteriores: lint con 0 errores/0 warnings, 31 pruebas aprobadas, build correcto y git diff --check correcto. La nueva prueba cubre la cancelación de apertura en escritorio y la vuelta a móvil sin reapertura.
 
-La verificación DOM/visual de estas correcciones sigue pendiente en este entorno: nuevo intento de Vite con EPERM y Chrome headless con salida 134. Repetir a 375 y 390 px en Empresas y Calendario: medir right de cada elemento de cabecera y scrollWidth/clientWidth del main, comprobar foco al abrir/cambiar empresa/cambiar rol/salir y cruzar 390→1280→390 con el menú abierto. Revalidar 768, 1280 y 1440 px. No se dejó servidor activo ni se modificaron las vistas del Bloque 2.
+La verificación DOM/visual de estas correcciones sigue pendiente en este entorno: nuevo intento de Vite con EPERM y Chrome headless con salida 134. Repetir a 375 y 390 px en Empresas y Calendario: medir right de cada elemento de cabecera y scrollWidth/clientWidth del main, comprobar foco al abrir/cambiar empresa/cambiar rol/salir y cruzar 390→1280→390 con el menú abierto. Revalidar 768, 1280 y 1440 px. No se dejó servidor activo ni se modificaron las vistas del Bloque 2. Ver [«Cómo leer las notas de verificación»](#cómo-leer-las-notas-de-verificación).
 
 ## Etapa móvil/tablet · Bloque 2: calendarios y filtros
 
@@ -143,7 +147,7 @@ La verificación DOM/visual de estas correcciones sigue pendiente en este entorn
 
 ### Verificación del Bloque 2 móvil
 
-Pruebas puras en `tests/mobileCalendar.test.ts`: selección de Mes/Semana, parámetros inválidos y cruces de año/mes, cuadrículas completas, indicadores con aislamiento del cliente, filtros activos, `9+`, etiquetas, navegación y pluralización. No hay jsdom ni herramienta de navegador en esta sesión. El intento de Vite falló con `listen EPERM 127.0.0.1:5173`; no quedó servidor activo.
+Pruebas puras en `tests/mobileCalendar.test.ts`: selección de Mes/Semana, parámetros inválidos y cruces de año/mes, cuadrículas completas, indicadores con aislamiento del cliente, filtros activos, `9+`, etiquetas, navegación y pluralización. No hay jsdom ni herramienta de navegador en esta sesión. El intento de Vite falló con `listen EPERM 127.0.0.1:5173`; no quedó servidor activo. Ver [«Cómo leer las notas de verificación»](#cómo-leer-las-notas-de-verificación).
 
 Protocolo DOM/visual pendiente (no ejecutado):
 
@@ -153,14 +157,14 @@ Protocolo DOM/visual pendiente (no ejecutado):
 4. Abrir/cerrar detalle desde una tarjeta y formulario desde Nueva publicación y Agregar publicación; verificar fecha, foco devuelto al disparador y confirmación de borrador/comentario pendiente. Las conexiones reutilizan las funciones existentes; su interacción DOM no pudo confirmarse aquí.
 5. Comparar a 1280×800 y 1440×900: mismas vistas y clics, número de Mes abre Semana destacando el día, navegación anual, filtros y detalle. La revisión estática no sustituye esta comparación visual.
 
-Limitaciones observadas por código, sin modificar: Tablero conserva cuatro columnas y controles pequeños en móvil; el editor conserva dos columnas de campos en un panel de 95vw y el detalle su rejilla de 135px + 1fr. Pueden quedar apretados; no se ha medido desbordamiento real. Su adaptación corresponde a los Bloques 3–4.
+Las limitaciones móviles de Tablero, editor y detalle observadas en este bloque se abordaron en los Bloques 3–4 descritos a continuación; la medición real de desbordamiento sigue pendiente.
 
 Resultado de comprobaciones de este bloque: `npm run lint` con 0 errores y 0 warnings; `npm test` con 37 pruebas aprobadas; `npm run build` correcto (TypeScript + Vite); `git diff --check` sin incidencias. Se conservaron los cambios previos del Bloque 1 y no se ejecutaron add, commit, push ni despliegues.
 
 ## Etapa móvil/tablet · Bloque 3: tablero y ajustes de calendarios
 
 - Tablero bajo 1024 px: desplazamiento horizontal contenido, columnas móviles de 85% (mínimo 260, máximo 340 px) y dos columnas completas en tablet. Anclaje `proximity` para facilitar Tab y desplazamiento nativo al enfocar controles. La región tiene nombre, instrucciones y flechas izquierda/derecha cuando recibe foco. Las columnas crecen con sus publicaciones; el scroll vertical queda en el main de la página. Se dejan encabezados simples para evitar conflictos entre sticky y el contenedor horizontal. Escritorio conserva las cuatro columnas y su scroll interno.
-- Estado: el mismo `StatusControl` usa hoja inferior en el tablero móvil/tablet y menú en escritorio. El detalle conserva su presentación anterior (Bloque 4 pendiente). La hoja reutiliza `Modal` nativo: fondo inerte, foco inicial en el estado actual, trampa de foco, Escape, fondo, Cerrar y Cancelar. Comparte `useSheetScrollLock` con Filtros. Las opciones incluyen marca «✓ Actual», son táctiles y admiten flechas, Home/End, Enter y Espacio. El listener `matchMedia/change` cierra al cruzar el corte y devuelve foco al disparador.
+- Estado: el mismo `StatusControl` usa hoja inferior en el tablero móvil/tablet y menú en escritorio. El detalle comparte la adaptación descrita en el Bloque 4. La hoja reutiliza `Modal` nativo: fondo inerte, foco inicial en el estado actual, trampa de foco, Escape, fondo, Cerrar y Cancelar. Comparte `useSheetScrollLock` con Filtros. Las opciones incluyen marca «✓ Actual», son táctiles y admiten flechas, Home/End, Enter y Espacio. El listener `matchMedia/change` cierra al cruzar el corte y devuelve foco al disparador.
 - El cambio usa exclusivamente `actions.changeStatus`: conserva permisos, sincronización y filtros. Después del render se busca el control por ID estable de publicación, se enfoca sin scroll implícito y se lleva la tarjeta a la vista horizontal/vertical con movimiento reducido respetado. Una región persistente anuncia «Título» ahora está en Estado. Si el filtro de estado excluye la tarjeta movida, se anuncia igualmente y el foco vuelve a Filtros; no se elimina el filtro para forzar su aparición.
 - Tarjetas: título de hasta tres líneas, responsable, fecha/hora, formato y visibilidad con icono y texto, estado textual y controles de al menos 44 px. Clic en el resto de la tarjeta abre el detalle existente. Los vacíos por columna y el aviso global con Limpiar filtros siguen usando la misma selección autorizada.
 - Año: contenido de mini meses alineado arriba bajo 1024 px, aunque una tarjeta tenga cinco semanas y otra seis. Las etiquetas de días comparten fecha civil larga en español, conteo pluralizado y «Hoy» cuando corresponde; se eliminaron fechas ISO de las etiquetas de acciones de Mes/Semana.
@@ -170,7 +174,7 @@ Resultado de comprobaciones de este bloque: `npm run lint` con 0 errores y 0 war
 
 - `npm run lint`: 0 errores, 0 warnings. `npm test`: 41 pruebas aprobadas. `npm run build`: TypeScript y Vite correctos. `git diff --check`: sin incidencias.
 - `tests/mobileBoard.test.ts` añade fechas 0/1/2, Hoy, cruces de mes/año y bisiesto; límites del viewport y movimiento reducido; hoja/menú en los cortes; anuncios; orden y conteos por columna con filtros combinados. Las pruebas existentes de acciones públicas cubren rechazo sin mutar para cliente y trabajador sin acceso a la empresa, y sincronización de vistas/detalle/contadores.
-- Sin dependencias nuevas ni jsdom. Intento local de Vite: `listen EPERM 127.0.0.1:5173`; Chrome headless: salida 134. No se dejó servidor activo. La validación visual/DOM siguiente está **pendiente, no ejecutada**; no se puede afirmar cero regresiones visuales solo con revisión estática.
+- Sin dependencias nuevas ni jsdom. Intento local de Vite: `listen EPERM 127.0.0.1:5173`; Chrome headless: salida 134. No se dejó servidor activo. La validación visual/DOM siguiente está **pendiente, no ejecutada**; no se puede afirmar cero regresiones visuales solo con revisión estática. Ver [«Cómo leer las notas de verificación»](#cómo-leer-las-notas-de-verificación).
 
 1. A 375/390, 640/768 y 1023 px, comprobar `document.documentElement.scrollWidth === document.documentElement.clientWidth` y `main.scrollWidth === main.clientWidth`. Solo el tablero debe tener scroll horizontal; recorrer cuatro estados y columnas largas con scroll vertical del main. Comprobar siguiente columna parcialmente visible en móvil y dos completas en tablet.
 2. Tab al tablero, flechas, Tab/Shift+Tab por controles en columnas fuera de vista. Abrir hoja: foco en actual, opciones de 48 px, Cancelar/Cerrar de 44 px, fondo inerte y sin scroll. Cancelar con cada vía sin mutación; comprobar foco al disparador. Abrir y cruzar 390→1280→390: cierre sin reapertura y scroll restaurado. Redimensionar con controles cerrados no debe robar foco.
@@ -195,7 +199,7 @@ Archivos modificados en este bloque: `README.md`, `src/lib/dates.ts`, `src/style
 
 `npm run lint`: 0 errores/0 warnings. `npm test`: 44 aprobadas. `npm run build`: correcto. `git diff --check`: correcto.
 
-**Comprobado en navegador de escritorio emulado:** nada en esta sesión; no hay herramienta de navegador disponible. Se revisó código y se ejecutaron las comprobaciones automatizadas. No se arrancaron servidores ni procesos persistentes. No se afirma regresión visual cero sin comparar 1280×800 y 1440×900.
+**Comprobado en navegador de escritorio emulado:** en la sesión de Codex de la Etapa móvil/tablet · Bloque 4 no se realizó esta comprobación porque no había herramienta de navegador disponible. Se revisó código y se ejecutaron las comprobaciones automatizadas; no se arrancaron servidores ni procesos persistentes. Claude realizó después la verificación separada, resumida en [Etapa móvil/tablet: verificación en navegador de escritorio emulado](#etapa-móviltablet-verificación-en-navegador-de-escritorio-emulado). La salvedad de aquella sesión, «No se afirma regresión visual cero sin comparar 1280×800 y 1440×900», quedó superada por la comprobación posterior de ambas resoluciones resumida allí.
 
 **Pendiente en navegador emulado:** a 375/390, 640/768/1023, 1280×800 y 1440×900, comprobar ausencia de desbordamiento, pies y último campo/error visibles, títulos/URLs/nombres de archivo de 120 caracteres sin espacios, foco circular y devolución al disparador. Probar todas las vías de descarte, hojas anidadas y permisos por rol. Mantener borrador inválido, adjuntos y URL/filtros durante 390→768→1280→390. Guardar fuera de filtros conserva periodo/día y muestra aviso. Comprobar agenda con tarjeta/vacío parcialmente visible, sin scroll por eventos ajenos a selección, y movimiento reducido.
 
@@ -216,3 +220,212 @@ Archivos modificados en este bloque: `README.md`, `src/components/ui.tsx`, `src/
 - Eliminar incluye el título completo entre «», renderizado como texto por React; vacío o solo espacios muestra «Publicación sin título». Se conserva `overflow-wrap: anywhere` de `.modal-body` tanto en escritorio como en móvil, sin truncar títulos de más de 120 caracteres. Pruebas puras cubren título normal, comillas/HTML literal, largo sin espacios y vacío.
 - Escritorio ≥1024 px: se conserva el pie estático al final del formulario dentro del panel desplazable; revisión estática sin reglas que bloqueen el scroll ni intercepten Tab entre el último campo, Cancelar y Guardar publicación. Verificación DOM pendiente a 1280×800 y 1440×900: desplazar hasta Guardar y recorrer esos controles con Tab, comprobando que el navegador los lleva a la vista.
 - Verificación manual DOM pendiente a 375/390, 768, 1280×800 y 1440×900: abrir Eliminar con títulos normales, vacíos, con comillas y de más de 120 caracteres sin espacios; comprobar texto íntegro y `scrollWidth <= clientWidth` en diálogo/cuerpo. En móvil, probar Comentar con equipo y cliente, teclado virtual y pie compacto: foco y textarea visibles sin quedar bajo el pie; enviar mediante Enviar comentario y comprobar foco posterior. No se ha ejecutado esta verificación visual en esta sesión.
+
+### Etapa móvil/tablet: verificación en navegador de escritorio emulado
+
+**Comprobado en navegador de escritorio emulado:** Claude realizó esta verificación después de cada bloque, de forma separada de la sesión de Codex y con el servidor local.
+
+- **Bloque 1 (navegación, login, empresas, cabeceras):** menú deslizable con foco inicial dentro, trampa de Tab, Escape, cierre al elegir sección o cambiar empresa o rol y limpieza al ensanchar a escritorio; cabecera sin recortes a 375/390; login con marca; panel de empresas; tablet 768; rotación que conserva ruta, fecha y filtros; escritorio sin regresión.
+- **Bloque 2 (calendarios y filtros):** Mes/Semana/Año a 375, 390 y 768 con regresión a 1280 y 1440; día seleccionado distinto de hoy sin depender del color; agenda del día sin abrir publicación; hoja de filtros con contador, foco y retorno; roles cliente y trabajador.
+- **Bloque 3 (tablero):** desplazamiento horizontal solo dentro del tablero, columnas de ancho parcial en móvil y dos en tablet, hoja de estado con foco y Escape, foco y columna en vista tras mover una tarjeta, flechas de teclado; ajustes de calendarios.
+- **Bloque 4 (formularios, detalle, comentarios y diálogos):** pantalla completa en móvil con pie fijo, rotación que conserva título y adjuntos, confirmaciones como hoja inferior, comentarios y adjuntos con textos largos sin desbordar, scroll a la agenda del Mes, regresión de escritorio a 1280×800 y 1440×900 y de tablet.
+- **Ajustes finales:** «Comentar»/«Enviar comentario», título en la confirmación de eliminar y Tab llega a Guardar en escritorio.
+
+Limitaciones de esa verificación: emulación de escritorio con clics de ratón; el diálogo nativo del selector de archivos no se abrió; se asignaron al mismo input objetos File generados en la página (imágenes creadas con un canvas y archivos de prueba) y se disparó su evento de cambio. El teclado virtual, los gestos táctiles y las safe areas reales no se probaron.
+
+El responsable del proyecto informó una revisión manual de la adaptación móvil en un teléfono real y la aprobó; los detalles de esa prueba no están registrados aquí.
+
+Para el panel de administración, las pruebas en dispositivos reales siguen pendientes.
+
+## Administración de plataforma (modelo)
+
+El modelo introducido en el Bloque 1 alimenta el panel y sus rutas actuales. Roger se representa mediante `PLATFORM_ADMIN_ID`, una identidad distinta del usuario Roger del espacio de trabajo. El administrador no es un `Role`, no aparece en el selector de demostración y usa `platformCan()`; `Role` y `can()` conservan sus reglas. La acción preexistente `viewOrganization` del espacio de trabajo sigue siendo independiente de la acción homónima de plataforma. Las lecturas administrativas solo resuelven metadatos de directorio, sin contenido ni conteos de contenido.
+
+- **Identidades y directorios:** `src/platform/ids.ts` comparte el id de la organización vinculada y los ids estables de usuarios. Sus empresas y usuarios se resuelven por referencia desde el espacio de trabajo; su nombre visible también procede de allí. La plataforma guarda directorios mínimos únicamente para organizaciones que no existen en el espacio de trabajo. La semilla incluye tres organizaciones identificadas como datos de ejemplo, una suspendida y un miembro suspendido en otra organización activa.
+- **Persistencia y sesiones:** el espacio de trabajo conserva `agenda-demo-v2`; la plataforma usa exclusivamente `agenda-platform-v1` en localStorage. La sesión administrativa usa `agenda-platform-session-v1` en sessionStorage, con alcance de pestaña. `src/auth/sessions.ts` coordina entradas y salidas excluyentes y restablece el rol a community manager al cerrar el espacio de trabajo. Todas las escrituras de trabajo rechazan sesiones cerradas; las operaciones y lecturas administrativas comprueban su propia sesión. No se guardan contraseñas ni credenciales.
+- **Acceso efectivo:** una organización desconocida bloquea el acceso. Su suspensión prevalece sobre el acceso individual; reactivarla conserva las suspensiones individuales. Suspender no elimina datos. `accessForWorkspace()` e `isAccessAllowed()` comunican únicamente acceso y código, nunca motivos. Desde el Bloque 5 estas decisiones están conectadas a App y a las escrituras del espacio de trabajo en esta simulación local.
+- **Sincronización:** la fábrica inyectable `createPlatformStore()` restaura y sanea el modelo, elimina huérfanos y propiedades ajenas, y vuelve a la semilla si el JSON o esquema están corruptos. Un estado válido sin la organización vinculada permanece bloqueado hasta restablecer. Cada escritura relee el almacenamiento y aumenta `revision`; también se refresca por `storage`, foco, visibilidad y antes de consultar acceso. `dispose()` retira escuchas y suscripciones. Los fallos de almacenamiento conservan la copia en memoria y exponen un aviso. `reconcileWithDirectory()` permite descartar referencias vinculadas a usuarios que ya no existen.
+- **Restablecimientos:** cada almacén restablece solo sus propios datos. Restablecer el espacio de trabajo mantiene ids y no levanta suspensiones; restablecer plataforma requiere administrador y siempre recupera la organización vinculada. Vaciar el almacenamiento del navegador equivale a un restablecimiento local completo de esta demo y no representa un bypass real de autorización: en producción las reglas las impone el servidor.
+- **Invitación simulada:** no se envía ningún correo ni se habilita un espacio de trabajo funcional para la organización creada. Solo se registra su community manager y la fecha de invitación simulada, sin empresas ni accesos al espacio de trabajo existente.
+
+Límites: demostración local, sin backend, servicios externos, pagos ni IA. La relectura evita sobrescribir cambios ya persistidos desde una pestaña desactualizada, pero localStorage no ofrece transacciones atómicas para escrituras estrictamente simultáneas. No hay sincronización entre dispositivos ni autenticación real. Las pruebas `tests/platform*.test.ts` cubren permisos, validación, sesiones, aislamiento, suspensiones, restauración, restablecimientos y dos instancias que simulan pestañas.
+
+## Acceso del administrador (simulación)
+
+En el login, pulsa **Entrar como administrador de la plataforma (simulación)**. El botón secundario no envía el formulario ni lee sus campos. Abre `/plataforma` como Roger Rodríguez, una identidad independiente de los tres roles de trabajo. **Salir de la simulación** cierra ambas sesiones y vuelve al login. Entrar al espacio de trabajo cierra la sesión administrativa; entrar al panel cierra la de trabajo. Si aparecen ambas activas en memoria en la misma pestaña por una inconsistencia, `selectActiveSession` devuelve `none` inmediatamente y `useActiveSession` ejecuta `logoutAll` antes de pintar (fail-closed). Ninguna sesión gana ese conflicto real en memoria. En cambio, al arrancar o recargar una pestaña con sesión administrativa, la marca `authenticated:true` de trabajo en localStorage puede proceder de otra pestaña: la restauración la trata como `false` solo en memoria, conserva al administrador y no llama a `logoutAll` ni escribe en localStorage. Así el primer render resuelve la sesión administrativa sin activar el cierre fail-closed.
+
+Las guardas se aplican desde `App` con `Navigate replace`, también al recargar y abrir una URL directa. Sin sesión, cualquier dirección vuelve a `/` y se eliminan query/hash; con sesión de trabajo, `/plataforma*` vuelve a `/empresas`; con sesión administrativa, cualquier dirección fuera de `/plataforma` o `/plataforma/**` vuelve a `/plataforma`, incluidas todas las rutas de empresas. Las rutas son sensibles a mayúsculas; el bloqueo del prefijo administrativo para trabajo también reconoce mayúsculas. `/plataforma/` muestra el panel, pero una ruta interna desconocida muestra su propia 404 con **Volver al panel**. Query/hash no alteran la decisión de ruta ni se arrastran al redirigir.
+
+La sesión administrativa es de pestaña (`sessionStorage`): recargar la misma pestaña la conserva; abrir `/plataforma` escribiendo la dirección en una pestaña nueva pide entrar de nuevo. Límite propio del navegador: duplicar una pestaña o abrirla con un `opener` puede copiar inicialmente su sessionStorage; eso no equivale a una pestaña nueva con almacenamiento independiente. La marca `authenticated` del espacio de trabajo sí se guarda en localStorage y es compartida entre pestañas del mismo origen. Entrar explícitamente como administrador cierra esa marca persistida de trabajo; otra pestaña de trabajo conserva su estado en memoria hasta recargar (o hasta una escritura propia que vuelva a persistirlo). Entrar al trabajo cierra únicamente la sesión administrativa de esa pestaña. Recargar una pestaña administrativa no ejecuta estas transiciones de entrada ni cambia la marca compartida. No se implementa autenticación real ni sincronización en vivo de las sesiones de trabajo entre pestañas.
+
+El panel tiene estructura propia, identidad, resumen de organizaciones (total, activas, suspendidas) y navegación a **Panel** y **Organizaciones**. El resumen usa `platformStore.listOrganizations` y el adaptador de directorio con organización, empresas y usuarios; no consulta contenido ni sus conteos. La suscripción del almacén refleja cambios de plataforma recibidos por `storage`, foco o visibilidad. El Bloque 3 incorpora listado y creación; el Bloque 4 añade detalle y gestión de estados administrativos.
+
+El aviso de simulación permanece encima del contenido, también en la 404, con versión compacta bajo 1024 px y otra copia dentro del menú. La barra lateral permanece en escritorio; móvil/tablet reutilizan el hook compartido `src/lib/useNavigationDrawer.ts` y los estilos existentes, incluidos foco, Tab/Shift+Tab, Escape, cierre exterior, bloqueo de scroll, retorno de foco y cierre al pasar a escritorio. La etiqueta **Administrador** y la línea superior distinguen la sección. El título cambia a `Administración · Agenda de Contenido` y se restaura fuera del panel; las guardas y la salida llevan el foco al main.
+
+Comprobaciones del Bloque 2 de plataforma: `npm run lint` sin errores ni warnings; `npm test`, 236 pruebas aprobadas; `npm run build`, correcto. Incluyen 168 casos de rutas (tres sesiones, catorce rutas y cuatro variantes de query/hash), exclusión real y recuperación fail-closed, observadores de sesión, restauración, lista blanca de navegación, selector de roles, adaptación mínima y análisis estático recursivo de `src/platform/**`, `src/auth/**` y `src/features/platform/**`. `tests/importCycles.test.ts` sigue pasando. No se añaden dependencias.
+
+Verificación DOM/visual pendiente (no hay herramienta de navegador disponible en esta sesión; no se arrancó servidor): Ver [«Cómo leer las notas de verificación»](#cómo-leer-las-notas-de-verificación).
+
+1. En 1440×900, 1280×800, 768 y 375/390 px, comprobar login, panel y 404 sin scroll horizontal (`document.documentElement.scrollWidth === document.documentElement.clientWidth`), aviso visible, safe areas, objetivos táctiles y comparación del espacio de trabajo con la versión previa.
+2. Recorrer el drawer con teclado, cerrar por Escape/fondo/Panel/salida, verificar foco e inert, y cruzar 390→1280→390 con menú abierto. Repetir con movimiento reducido.
+3. Entrar/salir por ambos accesos, recargar, abrir URLs directas de empresas y plataforma, navegar atrás/adelante y verificar foco en main tras guardas/salida y restauración del título. Abrir una pestaña independiente y comprobar que solicita entrar otra vez.
+4. Con dos pestañas administrativas, modificar datos de plataforma desde las herramientas locales y comprobar actualización del resumen por eventos de almacenamiento, sin añadir controles de edición a este bloque.
+
+Demostración exclusivamente local, sin backend, servicios externos, pagos ni IA. No se arrancaron servidores ni procesos persistentes y no se tocó el puerto 5173.
+
+
+## Plataforma · Bloque 3: organizaciones
+
+`/plataforma/organizaciones` muestra el listado con título «Organizaciones · Administración · Agenda de Contenido». Panel y Organizaciones son las únicas entradas de navegación; ambas cierran el menú móvil. El Bloque 4 incorpora las direcciones de detalle descritas más abajo. Las guardas conservan la separación entre sesión administrativa y de trabajo.
+
+- Tabla semántica desde 1024 px; tarjetas en dos columnas en tablet y una en móvil. Ambas representaciones permanecen en el mismo árbol y CSS determina cuál se muestra. Los nombres se ordenan alfabéticamente en español, sin distinguir mayúsculas. Solo se usan metadatos de organizaciones y miembros. El directorio vinculado no tiene correos: muestra «Sin correo registrado». Las etiquetas identifican los datos de ejemplo y las invitaciones simuladas; el estado incluye icono y texto.
+- Búsqueda por organización, nombre o correo de cualquiera de sus community managers, sin distinguir mayúsculas ni tildes, recortando y colapsando espacios. Los contadores Todas/Activas/Suspendidas se calculan después de buscar: Todas = Activas + Suspendidas y el contador seleccionado coincide con las filas visibles. Los resultados se anuncian con pluralización y región viva.
+- URL `?q=texto&estado=activas|suspendidas`; sin estado significa Todas. Se actualiza de forma controlada con `replace`, sin apilar historial ni perder el foco. Los parámetros inválidos se normalizan; los espacios se conservan durante la escritura y se sanea al salir del campo. Búsqueda y filtro sobreviven a recargas, rotación y creación. Limpiar devuelve el foco al buscador.
+- «Nueva organización» abre el diálogo compartido, con foco inicial, trampa de foco, Escape, cierre exterior y confirmación de descarte. Solo pide nombre de organización, nombre del community manager y correo. La validación por campo se centraliza en `platform/validation.ts`: obligatorios, nombres de 2–80 caracteres, correo válido de hasta 120, limpieza de espacios y correo en minúsculas. Los duplicados ignoran mayúsculas y tildes, y se comprueban entre todas las organizaciones y miembros de plataforma. Los errores se corrigen en vivo tras intentar guardar.
+- `platformStore.createOrganization` relee el almacenamiento y vuelve a comprobar sesión, validación y duplicados. Organización, miembro y registro de acceso se guardan juntos en una escritura con un solo incremento de revisión. Un rechazo no deja registros parciales ni modifica datos o revisión. Los errores finales de otra pestaña se muestran sin cerrar ni vaciar el formulario. La atomicidad corresponde al documento almacenado; localStorage no garantiza transacciones entre escrituras estrictamente simultáneas de pestañas.
+- El aviso de invitación simulada aparece dentro del formulario. Tras guardar se devuelve el foco a «Nueva organización» y queda un aviso persistente hasta pulsar «Entendido». Si el resultado queda oculto se explica y se ofrece limpiar búsqueda y filtros. La visibilidad del aviso se recalcula con el estado actual y los filtros. La etiqueta «Nueva» identifica la organización hasta descartar el aviso o iniciar otra creación. No hay desplazamiento automático: «Ver en la lista» desplaza únicamente por petición del usuario y enfoca el nombre, respetando movimiento reducido.
+- Persistencia en `agenda-platform-v1`, suscripción con `useSyncExternalStore` y sincronización por eventos del almacén. Los fallos de almacenamiento aparecen en pantalla y conservan la copia en memoria. No se generan empresas, usuarios del espacio de trabajo ni contenido; no hay envío de correo, backend, servicios externos, pagos ni IA. Las filas no son clicables; «Ver detalle» abre la pantalla del Bloque 4.
+- La regla específica de foco de `main[tabindex="-1"]` elimina el contorno del contenedor en toda la app, manteniendo su foco programático y los indicadores de los controles. En móvil, el formulario usa VisualViewport, safe areas y desplazamiento interno; las acciones permanecen en el flujo para no tapar campos ni errores.
+
+Verificación del bloque: `npm run lint` (0 errores y 0 warnings), `npm test` (292 pruebas aprobadas) y `npm run build` correctos. Las pruebas incluyen filas, búsqueda, contadores, URL, validación por campo, códigos finales, atomicidad, duplicados entre pestañas, persistencia, decisión de visibilidad, ausencia de credenciales, rutas, regla CSS de foco, separación recursiva de contenido y ciclos de importación. Sin dependencias nuevas.
+
+Verificación DOM/visual pendiente: no hay herramienta de navegador disponible en esta sesión. No se arrancó servidor ni se tocó el puerto 5173. Protocolo manual: Ver [«Cómo leer las notas de verificación»](#cómo-leer-las-notas-de-verificación).
+
+1. Revisar 1440×900, 1280×800, 768 y 375/390 px, con nombres de 80 y correos de 120 caracteres sin espacios: comprobar ausencia de scroll horizontal, etiquetas, tabla/tarjetas y foco visible.
+2. Buscar con tildes, cambiar filtros, recargar y rotar con el formulario abierto: comprobar conservación de URL, filtro, búsqueda y borrador. Probar el menú móvil y su cierre en ambas entradas.
+3. Recorrer el diálogo con Tab/Shift+Tab, corregir errores, abrir teclado virtual, probar Escape/X/Cancelar/fondo y confirmar/cancelar descarte. Comprobar retorno al botón principal, pie accesible y lectura de errores.
+4. Crear con búsqueda excluyente o Suspendidas activo, comprobar aviso persistente y limpiar con retorno al buscador. Crear una fila visible fuera de pantalla y comprobar que no hay desplazamiento automático; pulsar «Ver en la lista» y comprobar desplazamiento y foco en el nombre, también con movimiento reducido.
+5. En dos pestañas administrativas, crear un duplicado después de abrir el formulario en la otra: confirmar error de campo y borrador conservado. Revisar sincronización del listado, persistencia tras recargar y aviso cuando el almacenamiento falla.
+
+
+## Plataforma · Bloque 4: detalle y estados administrativos
+
+`/plataforma/organizaciones/:id` admite exactamente un identificador de 1–80 caracteres ASCII alfanuméricos, guion o guion bajo, con barra final opcional. Conserva la sensibilidad a mayúsculas de las rutas existentes. Las rutas inválidas muestran la 404 genérica del panel; un identificador válido que no existe muestra «Organización no encontrada», sin datos, con foco en el encabezado y vuelta al listado. Las guardas mantienen login sin sesión y redirección a Empresas para sesiones de trabajo. Panel y Organizaciones siguen siendo las únicas entradas; el detalle marca Organizaciones como actual.
+
+«Ver detalle» es un enlace independiente en cada fila/tarjeta. La URL del detalle transporta `q` y `estado`; «Volver a organizaciones» reconstruye exclusivamente esos parámetros saneados, sin depender del historial ni aceptar destinos externos. El título incluye el nombre actual de la organización, Organizaciones, Administración y el nombre de la aplicación.
+
+El detalle muestra resumen, fecha de creación, empresas y miembros, estados individuales y acceso efectivo calculado en el panel. La organización vinculada resuelve su nombre, empresas y usuarios desde el directorio del espacio de trabajo: no los copia al almacén administrativo. Los correos ausentes se indican expresamente. Las organizaciones nuevas mantienen el aviso de invitación simulada y no tienen empresas ni espacio de trabajo funcional. No se consulta contenido ni sus conteos y no hay enlaces al espacio de trabajo.
+
+Las causas distinguen organización suspendida, miembro suspendido y ambas causas. `resolveAccess` y `accessForWorkspace` conservan su contrato de código único por precedencia, sin motivos. Los motivos de suspensión (opcionales, recortados, hasta 200 caracteres) solo aparecen en la interfaz administrativa. Una prueba estática recursiva comprueba la separación de contenido y motivos, las escrituras mediante el almacén y la ausencia de enlaces a `/empresa*`.
+
+Suspender/reactivar requiere confirmación: diálogo nativo en escritorio y hoja inferior bajo 1024 px, con el mismo árbol React al rotar. El texto explica el alcance, conserva los nombres literalmente y calcula los miembros y suspensiones individuales actuales. Cancelar recibe el foco inicial; Escape y clic exterior cancelan. El diálogo conserva la trampa de foco, el fondo inerte nativo y bloqueo de scroll; al cerrar, el foco vuelve al botón original o su equivalente visible. Suspender no elimina datos. Reactivar una organización conserva todas las suspensiones individuales. Cada escritura pasa por `platformStore`, relee almacenamiento y verifica la sesión. Los resultados `no_change`, `not_found`, `unknown_member`, `no_admin_session` e `invalid_input` se presentan sin asumir éxito; los avisos de éxito persisten hasta «Entendido».
+
+**Actualización del Bloque 5:** la suspensión registrada en este panel ya bloquea el espacio de trabajo de demostración en este navegador. El aviso permanente junto a las acciones y dentro de las confirmaciones explica que es una simulación local sin protección real de servidor. No hay backend, servicios externos, pagos ni IA.
+
+Los cambios persisten en la clave existente `agenda-platform-v1`. El detalle se suscribe con `useSyncExternalStore`: las escrituras, restablecimientos y cambios recibidos por eventos de almacenamiento, foco o visibilidad actualizan el panel. Si una organización desaparece, se muestra la pantalla sin datos. Si se pierde el almacenamiento, se avisa de la recuperación de datos de ejemplo; los fallos de lectura/escritura muestran el aviso del almacén. Sigue existiendo el límite de escrituras simultáneas no transaccionales de localStorage.
+
+Correcciones del listado: el aviso de creación deriva del id creado y los resultados actuales, de modo que pasa de oculto a visible y viceversa al cambiar búsqueda/filtros. Bajo 1024 px se presenta primero como banda sticky dentro del main desplazable, debajo de la barra y del aviso permanente de simulación, con capa inferior al menú. Texto compacto, información completa accesible y margen de scroll para los controles; no desplaza automáticamente a ninguna fila. «Ver en la lista» usa `block: 'nearest'` y foco sin desplazamiento adicional. El buscador dice «community manager»; Panel y Organizaciones tienen iconos distintos y decorativos.
+
+### Comprobación y límites de verificación del Bloque 4
+
+Las pruebas puras cubren aviso reactivo, rutas/guardas, vuelta al listado, matriz de causas, textos y pluralización con N/K=0/1/2, nombres con comillas, directorios vinculados y nuevos, organización inexistente, los cuatro rechazos sin sesión, códigos de operaciones, conservación de datos y suspensiones individuales, contador K, persistencia del motivo y pérdida del almacenamiento. Se mantiene la prueba de ciclos de importación.
+
+Verificación DOM/visual pendiente: no hay herramienta de navegador disponible en esta sesión. No se arrancó ningún servidor ni se tocó el puerto 5173. Los comandos de comprobación son procesos transitorios y terminan; no queda ningún proceso de servidor iniciado por este trabajo. Ver [«Cómo leer las notas de verificación»](#cómo-leer-las-notas-de-verificación).
+
+Protocolo manual pendiente:
+
+1. A 1440×900, 1280×800, 768 y 375/390 px, comprobar tabla/tarjetas, textos largos y ausencia de scroll horizontal de página; estados con icono y texto, foco y objetivos de al menos 44 px.
+2. Crear con filtros excluyentes, cambiarlos varias veces y comprobar aviso reactivo. Desplazar el listado en móvil: la banda debe permanecer bajo el aviso de simulación y ocupar aproximadamente como máximo un cuarto del alto. Pulsar «Ver en la lista» y verificar un solo desplazamiento, foco y etiqueta «Nueva»; repetir con movimiento reducido.
+3. Entrar por URL directa y desde el listado, comprobar título, foco, volver conservando filtros y 404 frente a organización inexistente.
+4. Abrir las cuatro confirmaciones; recorrer Tab/Shift+Tab, cancelar por botón/Escape/fondo, confirmar y verificar retorno al botón equivalente y aviso persistente. Rotar 390→768→1280→390 con motivo escrito: conservar borrador y diálogo. En teléfono real, comprobar teclado virtual y último control visible.
+5. Con dos pestañas administrativas, cambiar estados mientras otra mantiene el detalle o confirmación, repetir una acción para `no_change`, restablecer una organización recién creada y comprobar pantalla sin datos, recargar y verificar persistencia. Quitar la clave y simular almacenamiento no disponible: comprobar avisos.
+
+Archivos de este bloque (respecto al estado recibido, que ya tenía cambios locales):
+
+- Creados: `src/features/platform/AccessConfirmation.tsx`, `src/features/platform/OrganizationDetail.tsx`, `src/features/platform/detailLogic.ts`, `tests/platformCreationNotice.test.ts`, `tests/platformDetail.test.ts`.
+- Modificados: `README.md`, `src/App.tsx`, `src/auth/routeGuard.ts`, `src/features/platform/Organizations.tsx`, `src/features/platform/organizationRows.ts`, `src/features/platform/PlatformShell.tsx`, `src/platform/access.ts`, `src/platform/operations.ts`, `src/platform/routes.ts`, `src/platform/store.ts`, `src/styles.css`, `tests/platform.test.ts`.
+- Eliminados: ninguno. No se modificaron `CLAUDE.md` ni `.claude/`. Sin add, commit, push ni despliegue.
+
+Resultado final: `npm run lint` con 0 errores y 0 warnings; `npm test` con 325 pruebas aprobadas (incluido `importCycles`); `npm run build` correcto. `git diff --check` correcto. No se añadieron dependencias.
+
+
+## Bloqueo en el espacio de trabajo (simulación) · Plataforma, Bloque 5
+
+La suspensión de la organización bloquea a todos sus miembros. La individual bloquea solo al usuario dentro de esa organización; reactivar la organización conserva las suspensiones individuales. Una organización desconocida deniega acceso. El administrador sigue siendo una identidad independiente: no se modifica `Role`, `can()` ni sus rutas, y no accede a publicaciones.
+
+El selector **Modo de demostración** cambia el usuario simulado: Community manager → Edison Valera (`edison`), Trabajador → Ana Torres (`ana`), Cliente → Roger Rodríguez (`roger`). Cada uno tiene su acceso individual. La organización es `org-1` (`LINKED_ORGANIZATION_ID`); `generateDemo()` conserva estos IDs y el de Pablo.
+
+- **Entrada, URL directa y recarga:** App decide el acceso antes de montar Workspace, incluidos `/empresas`, `/empresa/...` y `?publicacion=...`. El login y el cambio de rol refrescan plataforma. App se suscribe con `useSyncExternalStore`; también se refresca al navegar. No se consultan publicaciones en la pantalla bloqueada.
+- **Escrituras:** crear, editar, eliminar, cambiar estado, comentar, crear empresa, cambiar empresa activa y restablecer comprueban acceso dentro del almacén antes de operar. La guarda inyectable relee plataforma incluso sin haber recibido el evento de otra pestaña. Un rechazo devuelve «Tu acceso a esta organización está suspendido.» sin mutar estado, persistencia ni adjuntos. Entrar, salir y cambiar usuario simulado siguen permitidos.
+- **Sesión abierta:** una notificación de plataforma desmonta Workspace al quedar bloqueado. Se cierran diálogos, formularios y hojas y se pierden sus borradores; sus limpiezas no envían formularios ni guardan datos automáticamente. La guarda rechaza manejadores que intenten escribir con acceso obsoleto.
+- **Pantalla bloqueada:** título «Acceso suspendido», anuncio inmediato y foco al encabezado; muestra únicamente nombre/rol simulado y booleanos de causa traducidos a mensajes públicos. Incluye contacto, aviso de simulación, Salir y el mismo selector de demostración. No recibe motivos ni fechas administrativas, contenido ni enlaces al panel. Salir vuelve al login con foco en main.
+- **Reactivación:** monta de nuevo Workspace en la URL actual y enfoca el aviso de recuperación, o main si no hay aviso. Un aviso descartable anuncia «Tu acceso fue restablecido. Los cambios que no se guardaron antes del bloqueo no se recuperan.» No existe cola ni reintento automático de operaciones rechazadas.
+- **Reconciliación:** al iniciar App y cuando cambia la lista de IDs de usuarios, `reconcileWithWorkspace` relee el almacenamiento y elimina solo registros de acceso huérfanos de la organización vinculada. No requiere administrador porque no crea ni modifica accesos existentes ni estados de organización. Sin huérfanos no escribe, notifica ni incrementa revisión.
+- **Restablecimientos independientes:** restablecer trabajo necesita acceso permitido y no modifica plataforma. Un CM permitido puede regenerar la demo mientras Ana sigue suspendida, con IDs estables. Si el propio CM está bloqueado, su reset se rechaza. Restablecer plataforma es una acción deliberada del administrador: regenera la semilla y sus accesos; no modifica contenido. Vaciar almacenamiento equivale a un restablecimiento local completo, no a un bypass real de autorización.
+
+**Simulación local: este bloqueo se aplica solo en este navegador; no hay protección real de servidor.** En producción el servidor debe autorizar cada lectura y escritura. localStorage no ofrece transacciones atómicas entre pestañas; la relectura reduce estados obsoletos, pero no garantiza exclusión mutua ante escrituras simultáneas. Sin almacenamiento disponible se conserva la copia en memoria y no puede garantizarse sincronización entre pestañas. No se añade backend, servicios externos, pagos, IA ni dependencias. El Bloque 6 revisa foco, movimiento reducido e invariantes; véase el estado final al final de este documento.
+
+### Prueba manual con dos pestañas del mismo origen
+
+1. Usar dos pestañas independientes de la misma URL y **mismo puerto** del servidor que gestione el responsable. En A entrar como administrador; en B entrar al trabajo. La sesión administrativa pertenece a su pestaña. No usar otro puerto: tendría otro localStorage. Tras iniciar trabajo en B, recargar A y abrir allí directamente `/plataforma/organizaciones`: A debe conservar su sesión administrativa y B debe seguir trabajando; recargar B también debe conservar su sesión de trabajo. Verificar que el arranque de A no cambia `agenda-demo-v2` ni `agenda-platform-v1`. Como comprobación separada de la limitación existente, salir de A y entrar explícitamente como administrador: esa entrada cierra la marca persistida de trabajo; B conserva su estado en memoria, pero si recarga antes de otra escritura de trabajo vuelve al login.
+2. En B elegir Trabajador (Ana), abrir una publicación y escribir un borrador sin guardar. En A suspender a Ana con un motivo identificable. B debe desmontar contenido y mostrar solo la causa pública, nunca ese motivo. Elegir Cliente permite entrar si Roger no está suspendido.
+3. En A suspender la organización. Todos los usuarios de B deben quedar bloqueados, incluidas las URL directas y recargas con `?publicacion=...`. Reactivar solo la organización: Ana sigue bloqueada; Roger y Edison recuperan acceso.
+4. Reactivar a Ana: B recupera la URL actual, foco en el aviso descartable de recuperación. El borrador anterior desaparece, sin guardado ni reintento. Repetir con el drawer, editor, comentario y confirmación abiertos. Comprobar eventos storage, volver a la pestaña y recuperar visibilidad.
+5. Revisar 1440×900, 1280×800, 768, 375 y 390 px: sin scroll horizontal de página, texto legible, controles de al menos 44 px, Tab/Shift+Tab, foco en h1 al bloquear y main al salir y aviso al recuperar. Repetir con movimiento reducido. La pantalla usa una sola columna y no añade animaciones.
+
+Las pruebas sin DOM cubren la matriz completa, identidades, mensajes públicos, guardas, todas las escrituras, dos almacenes con almacenamiento compartido, eventos, mantenimiento, restablecimientos y ausencia de reintentos. Las pruebas estáticas conservan separación de motivos, roles y navegación y el grafo sin ciclos. La revisión posterior en navegador de escritorio emulado comprobó foco con el documento activo, cierre del formulario sin guardar el borrador y ausencia de desbordamiento en los tamaños especificados en la sección de estado final. Los anuncios con lectores de pantalla y las pruebas en dispositivos reales siguen pendientes; véase esa sección para el alcance exacto.
+
+### Resultado de comprobaciones e inventario del Bloque 5
+
+- `npm run lint`: 0 errores, 0 warnings.
+- `npm test`: 338 pruebas aprobadas, 0 fallos, incluido `importCycles.test.ts`.
+- `npm run build`: TypeScript y Vite correctos.
+- `git diff --check`: correcto; no se ejecutaron add, commit, push ni despliegues.
+
+Creados: `src/features/access/AccessSuspended.tsx`, `src/features/access/accessMessages.ts`, `src/features/access/workspaceGate.ts`, `src/features/workspace/DemoMode.tsx`, `src/store/accessGuard.ts`, `tests/workspaceAccess.test.ts`, `tests/workspaceWrites.test.ts`.
+
+Modificados en esta intervención: `README.md`, `src/App.tsx`, `src/features/workspace/ProfileMenu.tsx`, `src/features/workspace/Workspace.tsx`, `src/features/platform/detailLogic.ts`, `src/lib/useNavigationDrawer.ts`, `src/platform/access.ts`, `src/platform/directory.ts`, `src/platform/store.ts`, `src/store/index.ts`, `src/store/selectors.ts`, `src/styles.css`, `tests/platform.test.ts`, `tests/platformDetail.test.ts`. Sin archivos eliminados. Se respetaron los cambios previos del directorio de trabajo; no se modificaron `CLAUDE.md`, `.claude/`, `Role`, `can()` ni las rutas administrativas.
+
+Solo se ejecutaron comandos transitorios de inspección, edición y validación. Las ejecuciones de pruebas con PID 63065, 63332 y 63842, build con PID 63100 y 63815 y lint final con PID 63679 terminaron; el lint inicial también terminó (su PID no quedó registrado). No se arrancó ningún servidor, no se intervino ningún proceso del puerto 5173 y no quedó ningún proceso iniciado por esta tarea en ejecución.
+
+## Panel de administración: estado final, limitaciones y pruebas manuales pendientes
+
+El panel incluye listado, búsqueda y filtros, creación con invitación simulada, detalle, suspensión/reactivación de organizaciones y miembros, acceso efectivo con sus causas, bloqueo del espacio de trabajo y reconciliación del directorio. El administrador no es un `Role`, usa su propia sesión y permisos y no accede a publicaciones, comentarios ni adjuntos. El motivo de suspensión es privado del administrador.
+
+Al bloquear se desmonta el espacio de trabajo: los formularios y hojas se cierran y **los cambios sin guardar se descartan y no se recuperan**. Los datos ya guardados permanecen: suspender no borra publicaciones, comentarios, empresas ni miembros. Las referencias anteriores a mantener formularios durante rotación o errores de validación no se aplican al bloqueo.
+
+La recuperación se registra por usuario simulado dentro de la sesión abierta. Solo se muestra el aviso cuando esa misma identidad, observada como bloqueada, pasa a permitida. Cambiar desde la pantalla suspendida a un usuario nunca bloqueado no muestra «restablecido» y lleva el foco a main. Volver a una identidad antes bloqueada y ahora permitida sí muestra el aviso; salir de la sesión limpia ese registro. El evento se consume una vez: renders, navegación y eventos de almacenamiento repetidos no vuelven a anunciarlo.
+
+El aviso superior mantiene el texto «Tu acceso fue restablecido. Los cambios que no se guardaron antes del bloqueo no se recuperan.», con `tabIndex=-1`, `role=status`, `aria-live=polite` y contorno `:focus-visible`. Tiene margen de desplazamiento para la barra móvil. «Entendido» lo retira y enfoca main con `preventScroll`, sin contorno del contenedor. Orden de foco: diálogo/hoja o menú abierto; recuperación pendiente (aviso, o main si ya no existe); retorno normal al disparador. Los cierres compartidos atienden la recuperación pendiente antes de restaurar el foco anterior.
+
+La auditoría de movimiento detectó una transición de sombra/borde de tarjetas sin override; el drawer ya tenía override de transform. El reset bajo `prefers-reduced-motion: reduce`, limitado al documento y árbol de la aplicación y sus pseudo-elementos, desactiva transiciones, animaciones y scroll suave. Hojas, diálogos, paneles, etiqueta «Nueva» y pantalla suspendida no tienen animaciones propias ni skeletons animados. Agenda, columna del tablero, «Ver en la lista», campos de formulario/viewport y comentarios ya usan la utilidad compartida de scroll; ahora se prueba con matchMedia simulado. El desplazamiento de recuperación es inmediato para mantener foco y aviso juntos.
+
+Los almacenes mantienen claves separadas. Restablecer trabajo y reconciliar no levantan suspensiones; la reconciliación solo elimina referencias huérfanas y no escribe ni incrementa revisión sin cambios. El restablecimiento explícito de plataforma es la única operación de restablecimiento de la aplicación que regenera las suspensiones desde la semilla (incluida la organización vinculada e IDs válidos). Reactivar accesos individuales u organizaciones sigue siendo una acción administrativa deliberada distinta. Un estado válido sin la organización vinculada bloquea el acceso; JSON corrupto recupera la semilla local sin lanzar.
+
+Limitaciones: simulación local sin servidor ni protección real; localStorage sin transacciones atómicas. La sincronización usa pestañas/ventanas del mismo origen (protocolo, host y puerto), eventos `storage`, foco y visibilidad. sessionStorage es por pestaña y duplicarla puede copiar la sesión administrativa. Vaciar el almacenamiento o recuperar JSON corrupto regenera datos locales y puede restablecer suspensiones fuera de las operaciones de la aplicación. Los borradores se descartan al bloquear. La invitación no envía correo ni crea un espacio de trabajo funcional; las organizaciones de ejemplo tampoco tienen espacio de trabajo funcional.
+
+**Comprobado en navegador de escritorio emulado (revisión del 21 de octubre de 2026):**
+
+- Recorrido completo del administrador: crear una organización (invitación simulada visible), buscarla sin tildes y en mayúsculas, abrir su detalle (el enlace de vuelta conserva la búsqueda), suspender y reactivar la organización y a un miembro, con confirmaciones que explican el alcance y avisan de que los cambios sin guardar se descartan.
+- Dos pestañas del mismo origen (puerto 5173; A administración, B trabajo): la suspensión de la organización bloquea B de inmediato; con un formulario abierto en B, este se cierra y **no se guarda el borrador** (el número de publicaciones no cambia). Reactivar restablece B en la misma URL. La suspensión individual se conserva al reactivar la organización (el usuario sigue bloqueado y los otros entran); reactivar a esa persona devuelve el acceso. Recargar A conserva su sesión de administrador y no afecta a B, tras la corrección del aislamiento de sesiones.
+- Operación con datos obsoletos: con la interfaz mostrando todavía el espacio de trabajo (evento no recibido), una acción de escritura se rechazó sin cambiar datos y la pantalla pasó a bloqueada.
+- Foco con la pestaña en primer plano y con foco real: al bloquearse, el foco va al título «Acceso suspendido»; al restablecerse, va al aviso de recuperación (visible, `role="status"`, `aria-live="polite"`). «Entendido» lo retira y pasa el foco a `<main>` sin contorno. En una pestaña en segundo plano o sin foco del documento, el foco programático no se mueve (limitación del navegador, no del código).
+- Restablecer el espacio de trabajo (con una empresa creada antes: desapareció) no levantó la suspensión de un usuario; la reconciliación eliminó solo un registro huérfano inyectado y conservó la suspensión existente.
+- Operaciones del almacén de plataforma llamadas sin sesión de administrador (crear, suspender/reactivar organización y miembro, restablecer plataforma): todas devolvieron `no_admin_session` sin tocar almacenamiento ni revisión. Rutas directas: con sesión de trabajo, `/plataforma/...` redirige a `/empresas`; con sesión de administrador, `/empresa/...` redirige a `/plataforma` sin contenido ni enlaces del espacio de trabajo.
+- Movimiento reducido: el CSS tiene un reinicio global bajo `prefers-reduced-motion: reduce` (sin transiciones, animaciones ni scroll suave) y el menú lateral sin transición; con `matchMedia` simulado, un desplazamiento automático (tablero) usa `behavior: "auto"` con reducción y `behavior: "smooth"` sin ella. **No se probó con el ajuste real del sistema operativo.**
+- Tamaños sin desbordamiento horizontal de página: listado y detalle del panel a 375, 390, 768, 1280 y 1440 px (comprobado por medidas del DOM); pantalla de acceso suspendido y espacio de trabajo en comprobaciones anteriores del Bloque 5 a 390, 768, 1280 y 1440 px.
+
+Estas comprobaciones en navegador de escritorio emulado **no sustituyen las pruebas en dispositivos reales**; se mantiene la lista de pendientes siguiente.
+
+**Pendiente en dispositivos y navegadores reales:**
+
+- Safari iOS y Chrome Android: teclado virtual, safe areas, selector de archivos nativo, gestos táctiles y rotación.
+- VoiceOver/TalkBack: anuncios de bloqueo, recuperación y confirmaciones, y orden de foco.
+- Movimiento reducido activado en el sistema operativo: drawer, hojas, paneles y todos los desplazamientos automáticos.
+- Dos ventanas/pestañas del mismo origen en cada navegador; Firefox y Safari para eventos `storage`, foco y visibilidad.
+
+Validación del Bloque 6: `npm run lint` sin errores ni warnings; `npm test` con 418 pruebas aprobadas (incluido `tests/importCycles.test.ts`); `npm run build` correcto; `git diff --check` correcto. Se amplían las matrices de rutas, rechazo sin sesión, referencias tras reset/reconciliación y aislamiento de claves, y se añaden pruebas de recuperación y movimiento reducido. La primera ejecución de las pruebas nuevas detectó una comparación de JSON sensible al orden de propiedades; se corrigió la prueba para comparar estructuras.
+
+Inventario exclusivo de esta revisión (el directorio ya contenía cambios anteriores):
+
+- Creados: `src/features/access/recovery.ts`, `src/lib/recoveryFocus.ts`, `tests/recovery.test.ts`, `tests/reducedMotion.test.ts`.
+- Modificados: `README.md`, `src/App.tsx`, `src/components/ui.tsx`, `src/features/workspace/Workspace.tsx`, `src/features/platform/OrganizationDetail.tsx`, `src/features/platform/detailLogic.ts`, `src/lib/useNavigationDrawer.ts`, `src/lib/scroll.ts`, `src/platform/validation.ts`, `src/styles.css`, `tests/platform.test.ts`, `tests/platformDetail.test.ts`, `tests/platformRoutes.test.ts`, `tests/platformStore.test.ts`, `tests/workspaceWrites.test.ts`.
+- Eliminados: ninguno. Sin dependencias nuevas, add/commit/push ni despliegues; `CLAUDE.md` y `.claude/` intactos.
+
+No se arrancaron servidores ni procesos persistentes ni se tocó el puerto 5173. Los procesos transitorios de validación registrados fueron lint 66934 y 67124, pruebas 66961 y 67089, y build 66994; todos terminaron normalmente. Las primeras ejecuciones transitorias también finalizaron, pero sus PID no quedaron registrados. No queda ninguna ejecución iniciada por esta revisión pendiente.
+
+### Corrección de arranque entre pestañas · Continuación del Bloque 6
+
+La restauración de trabajo neutraliza `authenticated` solo en memoria si la pestaña tiene sesión administrativa. La prueba `tests/sessionStartup.test.ts` inyecta localStorage compartido y sessionStorage de A antes de cargar los almacenes reales: verifica sesión administrativa y rutas, cero escrituras de arranque, marca persistida de B intacta y cierre de ambas sesiones ante un conflicto posterior real en memoria. No cambian el coordinador de transiciones, los roles, los permisos ni las guardas de rutas. El procedimiento manual de dos pestañas anterior incluye recarga y URL directa en A. Tras esta corrección, la revisión en navegador de escritorio emulado del 21 de octubre de 2026 comprobó que recargar A conserva su sesión administrativa y no afecta a B; el alcance comprobado y los pendientes en dispositivos reales se detallan en la sección de estado final.
+
+Validación de esta continuación: lint sin errores ni warnings, 419 pruebas aprobadas (incluidos ciclos de importación), build correcto y `git diff --check` correcto. Modificados: `src/store/index.ts`, comentario de `src/auth/activeSession.ts` y `README.md`; creado: `tests/sessionStartup.test.ts`. Ningún archivo eliminado. Procesos de validación: lint PID 69133, pruebas PID 69159, build PID 69224; todos terminaron con código 0. No se arrancaron servidores, no se tocó el puerto 5173 y no quedaron procesos en ejecución. Sin add/commit/push, despliegues ni modificaciones de `CLAUDE.md` o `.claude/`.

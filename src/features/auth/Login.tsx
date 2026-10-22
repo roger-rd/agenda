@@ -1,3 +1,4 @@
+import { enterPlatformAdmin } from '../../auth/sessions';
 import { useNavigate } from 'react-router';
 import { CalendarDays, ArrowRight } from 'lucide-react';
 import { actions } from '../../store';
@@ -38,6 +39,11 @@ export function Login() {
           <input type="password" autoComplete="off" placeholder="Escribe una contraseña" />
         </label>
         <Button className="primary">Entrar a la demostración <ArrowRight size={17} /></Button>
+        <Button type="button" className="admin-entry" aria-describedby="admin-entry-note"
+          onClick={() => { enterPlatformAdmin(); navigate('/plataforma'); }}>
+          Entrar como administrador de la plataforma (simulación)
+        </Button>
+        <p id="admin-entry-note" className="admin-entry-note">Simulación: no hay autenticación real y no se pide contraseña. El administrador no accede al contenido de las empresas.</p>
       </form>
       <div className="notice">
         Entrarás como <strong>Edison Valera</strong>, community manager. Autenticación de demostración local.

@@ -1,3 +1,4 @@
+import { restorePendingWorkspaceFocus } from '../lib/recoveryFocus';
 import { useEffect, useId, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { useDialogViewport } from '../lib/useDialogViewport';
 import { useDesktop } from '../lib/useDesktop';
@@ -36,6 +37,7 @@ export function Modal({ title, onClose, children, side = false, initialFocus, cl
         if (initialFocus) dialog?.querySelector<HTMLElement>(initialFocus)?.focus();
         return () => {
             dialog?.close();
+            if (restorePendingWorkspaceFocus()) return;
             if (previous?.isConnected) previous.focus();
             else document.querySelector<HTMLElement>('.view-switch [aria-pressed="true"]')?.focus();
         };

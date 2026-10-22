@@ -1,10 +1,14 @@
+import { WORKSPACE_USER_IDS } from '../platform/ids';
 import type { State, PostStatus, PostFormat } from '../types';
 import { can } from './permissions';
 import { zonedFormat } from '../lib/dates';
 import { dateKey, periodRange, type View } from '../lib/periods';
 
-const profileIds = { community_manager: 'edison', worker: 'ana', client: 'roger' };
-export const selectUser = (s: State) => s.users.find(u => u.id === profileIds[s.role])!;
+const profileIds = { community_manager: WORKSPACE_USER_IDS.manager, worker: WORKSPACE_USER_IDS.worker, client: WORKSPACE_USER_IDS.client };
+// El selector de demo cambia la identidad simulada y su acceso individual.
+export const currentUserId = (s: State) => profileIds[s.role];
+export const workspaceOrganizationId = (s: State) => s.organization.id;
+export const selectUser = (s: State) => s.users.find(u => u.id === currentUserId(s))!;
 export const selectCompanies = (s: State) => s.companies.filter(c =>
   c.organizationId === s.organization.id && (can(s.role, 'viewAllCompanies')
     || s.memberships.some(m => m.companyId === c.id && m.userId === selectUser(s).id)));

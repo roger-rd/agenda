@@ -5,7 +5,7 @@ import { santiagoInstant } from '../src/lib/dates';
 import { emptyFilters, selectPost, selectViewPosts } from '../src/store/selectors';
 
 test('store: cambio único sincroniza Año/Mes/Semana/Tablero/detalle y confirmaciones', async () => {
-  const fixture = generateDemo();
+  const fixture = { ...generateDemo(), authenticated: true };
   fixture.posts = [{ ...fixture.posts[0], id: 'sync', scheduledAt: santiagoInstant('2026-01-15', '12:00'), status: 'Pendiente' }];
   const storage = new Map([['agenda-demo-v2', JSON.stringify(fixture)]]);
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
