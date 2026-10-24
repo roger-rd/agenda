@@ -1,3 +1,5 @@
+import { normalized } from './validation';
+import { organizationDisplayName, type WorkspaceDirectory } from './directory';
 import type { PlatformState } from './types';
 export const ACCESS_MESSAGES = {
   organization_suspended: 'El acceso a esta organización está suspendido.',
@@ -35,8 +37,10 @@ export function accessCausesForWorkspace(state: PlatformState, organizationId: s
 export type WorkspaceAccessCauses = ReturnType<typeof accessCausesForWorkspace>;
 
 // Solo decisiones de lectura para invitaciones; no entrega motivos ni directorios privados.
-export function workspacePolicy(state: PlatformState) {
+export function workspacePolicy(state: PlatformState, workspace?: WorkspaceDirectory) {
   return {
+    organizationNameTaken: (name: string, exceptOrganizationId: string) => state.organizations.some(o =>
+      o.id !== exceptOrganizationId && normalized(workspace ? organizationDisplayName(state, workspace, o.id)! : o.name) === normalized(name)),
     memberSuspended: (organizationId: string, userId: string) => state.memberAccess.some(a => a.organizationId === organizationId && a.userId === userId && a.status === 'suspended'),
     organizationActive: (id: string) => state.organizations.some(o => o.id === id && o.status === 'active'),
     emailExists: (email: string) => state.members.some(m => m.email.trim().toLowerCase() === email),

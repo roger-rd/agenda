@@ -5,7 +5,7 @@ import { changePostStatus, transitionPost, statuses } from './transitions';
 import { metadata, validateDraft, type PostInput } from '../features/posts/validation';
 import { zonedFormat } from '../lib/dates';
 
-export type Result = { ok: true; state: State } | { ok: false; reason: string; code?: WorkspaceError };
+export type Result = { ok: true; state: State } | { ok: false; reason: string; code?: WorkspaceError; field?: 'name' | 'color' };
 const reject = (reason: string): Result => ({ ok: false, reason });
 function authorized(s: State, action: Action, companyId: string) {
   return s.authenticated && can(s.role, action) && !!selectCompany(s, companyId);
@@ -71,6 +71,6 @@ export function serializeState(s: State): string {
   })) });
 }
 
-export type WorkspaceError = 'email_mismatch' | 'conflict' | 'storage_unavailable' | 'forbidden' | 'invalid_input' |
+export type WorkspaceError = 'duplicate_name' | 'invalid_color' | 'email_mismatch' | 'conflict' | 'storage_unavailable' | 'forbidden' | 'invalid_input' |
   'not_found' | 'used' | 'revoked' | 'expired' | 'organization_unavailable' |
   'invalid_companies' | 'session_active' | 'existing_member' | 'duplicate_email';

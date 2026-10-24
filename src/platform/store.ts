@@ -73,7 +73,7 @@ export function createPlatformStore(storage: StorageLike | undefined, options: S
     isAccessAllowed: (organizationId: string, userId: string) => { refresh(); return accessForWorkspace(state, organizationId, userId); },
     listOrganizations: (workspace: WorkspaceDirectory) => { refresh(); return operations.listOrganizations(state, session(), workspace); },
     viewOrganization: (id: string, workspace: WorkspaceDirectory) => { refresh(); return operations.viewOrganization(state, session(), id, workspace); },
-    createOrganization: (input: unknown) => write((s, session) => operations.createOrganization(s, session, input)),
+    createOrganization: (input: unknown, workspace?: WorkspaceDirectory) => write((s, session) => operations.createOrganization(s, session, input, undefined, undefined, workspace)),
     suspendOrganization: (input: operations.StatusInput) => write((s, session) => operations.suspendOrganization(s, session, input)),
     reactivateOrganization: (input: operations.StatusInput) => write((s, session) => operations.reactivateOrganization(s, session, input)),
     suspendMember: (input: operations.MemberStatusInput) => write((s, session) => operations.suspendMember(s, session, input)),

@@ -103,7 +103,7 @@ export function Organizations() {
           <dl><dt>Organización</dt><dd><Name row={row} fresh={fresh === row.id} /></dd><dt>Community manager</dt><dd><Managers row={row} /></dd><dt>Correo</dt><dd><Emails row={row} /></dd><dt>Estado</dt><dd><OrganizationStatus row={row} /></dd></dl><Link className="button" aria-label={`Ver detalle de ${row.name}`} to={`/plataforma/organizaciones/${row.id}${canonical ? `?${canonical}` : ''}`}>Ver detalle</Link>
         </article>)}</div>
       </div>}
-    {open && <OrganizationForm onClose={close} onSaved={next => {
+    {open && <OrganizationForm workspace={workspace} onClose={close} onSaved={next => {
       const organization = next.organizations.at(-1)!;
       const row = organizationRows([organization], next, workspace)[0];
       setSuccess({ row });

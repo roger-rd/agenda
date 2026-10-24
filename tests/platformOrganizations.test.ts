@@ -123,5 +123,5 @@ test('CSS de foco específico, controles conservados y formulario sin credencial
   const form = readFileSync(new URL('../src/features/platform/OrganizationForm.tsx', import.meta.url), 'utf8');
   assert.doesNotMatch(form, /password|contraseña|localStorage/);
   assert.match(form, /SIMULATED_INVITATION_NOTICE/);
-  assert.match(form, /platformStore.createOrganization\(draft\)/);
+  assert.match(form, /platformStore.createOrganization\(draft, workspace\)/);
 });

@@ -155,9 +155,9 @@ test('retirada conserva contenido y responsable anterior; CM puede reasignar con
 });
 test('dos instancias obsoletas: escrituras reejecutadas conservan ambas empresas y sesión local', () => {
   const f = fixture(), b = createWorkspaceStore(f.storage, f.options);
-  success(b.actions.setActiveUser('pablo')); success(f.store.actions.createCompany('Primera', '#fff'));
+  success(b.actions.setActiveUser('pablo')); success(f.store.actions.createCompany('Primera', '#ffffff'));
   b.refresh(); assert.equal(b.getState().activeUserId, 'pablo'); assert.equal(b.getState().role, 'worker');
-  success(b.actions.setRole('community_manager')); success(b.actions.createCompany('Segunda', '#fff'));
+  success(b.actions.setRole('community_manager')); success(b.actions.createCompany('Segunda', '#ffffff'));
   f.store.refresh(); assert.ok(f.store.getState().companies.some(c => c.name === 'Primera')); assert.ok(f.store.getState().companies.some(c => c.name === 'Segunda'));
   success(b.actions.logout()); f.store.refresh(); assert.equal(f.store.getState().authenticated, true);
 });
@@ -177,13 +177,13 @@ test('lease ocupado rechaza; lease expirado se recupera; verificación final det
   unchanged(f, () => f.store.actions.createInvitation(input), 'conflict');
   f.storage.data.set(`${key}:lock`, JSON.stringify({ token: 'abandonado', expiresAt: 1 })); success(f.store.actions.createInvitation(input));
   f.storage.hook = writtenKey => { if (writtenKey === key) f.storage.data.set(`${key}:lock`, JSON.stringify({ token: 'interferencia', expiresAt: Date.parse('2026-10-22') })); };
-  error(f.store.actions.createCompany('Interferencia', '#fff'), 'conflict');
+  error(f.store.actions.createCompany('Interferencia', '#ffffff'), 'conflict');
 });
 test('storage/focus/visibility conservan sesión local y normalizan empresa/persona eliminadas; dispose', () => {
   const f = fixture(), windowTarget = new EventTarget(), documentTarget = new EventTarget();
   const b = createWorkspaceStore(f.storage, { ...f.options, windowTarget, documentTarget }); success(b.actions.setActiveUser('ana'));
   for (const [target, type] of [[windowTarget, 'storage'], [windowTarget, 'focus'], [documentTarget, 'visibilitychange']] as const) {
-    success(f.store.actions.createCompany(type, '#fff'));
+    success(f.store.actions.createCompany(type, '#ffffff'));
     const event = new Event(type); Object.defineProperty(event, 'key', { value: key }); target.dispatchEvent(event);
     assert.equal(b.getState().activeUserId, 'ana'); assert.equal(b.getState().authenticated, true);
     assert.ok(b.getState().companies.some(c => c.name === type));
@@ -192,7 +192,7 @@ test('storage/focus/visibility conservan sesión local y normalizan empresa/pers
   f.storage.setItem(key, JSON.stringify(s)); b.refresh(); assert.equal(b.getState().activeCompanyId, 'company-1');
   s.users = s.users.filter(u => u.id !== 'ana'); s.revision++;
   f.storage.setItem(key, JSON.stringify(s)); b.refresh(); assert.equal(b.getState().authenticated, false);
-  b.dispose(); const before = b.getState(); success(f.store.actions.createCompany('Después', '#fff')); windowTarget.dispatchEvent(new Event('focus')); assert.equal(b.getState(), before);
+  b.dispose(); const before = b.getState(); success(f.store.actions.createCompany('Después', '#ffffff')); windowTarget.dispatchEvent(new Event('focus')); assert.equal(b.getState(), before);
 });
 test('directorio nuevo sin correos vinculados, invitaciones, códigos ni conteos; reconciliación solo huérfanos', () => {
   const f = ready(), s = success(f.store.actions.acceptInvitation(f.invitation.code, { email: ' NUEVA@example.cl ', name: 'Nueva' }));

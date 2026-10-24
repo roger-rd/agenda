@@ -17,9 +17,9 @@ export function viewOrganization(state: PlatformState, session: AdminSession | n
     directory: resolveDirectory(state, workspace, organization.id), memberAccess: state.memberAccess.filter(a => a.organizationId === organization.id) } };
 }
 export function createOrganization(state: PlatformState, session: AdminSession | null, input: unknown,
-  now = new Date(), id = crypto.randomUUID()): Result {
+  now = new Date(), id = crypto.randomUUID(), workspace?: WorkspaceDirectory): Result {
   if (!platformCan(session, 'createOrganization')) return denied();
-  const valid = validateOrganization(state, input);
+  const valid = validateOrganization(state, input, workspace);
   if (!valid.ok) return valid;
   if (state.organizations.some(o => o.id === id) || state.members.some(m => m.id === `${id}-manager`))
     return { ok: false, code: 'invalid_input', reason: 'Identificador ya utilizado.' };

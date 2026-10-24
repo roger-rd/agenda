@@ -508,3 +508,27 @@ La lectura de `App`, `PlatformShell`, `OrganizationDetail` y `detailLogic` confi
 **Pendiente real / no verificado:** dispositivos reales iOS/Android; navegación solo con teclado y lectores de pantalla en los diálogos y la página de aceptación; clic estrictamente simultáneo desde dos pestañas; página de aceptación a 1280 px (se comprobaron 375/390/768/1440); regresión visual completa de las vistas anteriores en esta etapa (se confiaron las pruebas automáticas).
 
 **Comprobaciones finales:** Codex ejecutó `node --import tsx --test tests/invitationAccept.test.ts tests/teamAccess.test.ts tests/invitationsUi.test.ts tests/invitations.test.ts`: 198 pruebas aprobadas, 0 fallos, 0 omitidas; `npm run lint`: código 0, sin errores ni advertencias; `npm run build`: código 0, TypeScript y Vite correctos, 2940 módulos; `git diff --check`: sin incidencias. Lint y build se ejecutaron una vez; no se ejecutó `npm test` completo ni verificación de navegador en esta sesión.
+
+## Ajustes de organización y empresa: cierre (Bloque C)
+
+**Alcance de la etapa.** Página `/ajustes` (solo community manager) con las secciones Organización y Empresas. Permite editar el nombre de la organización y el nombre y color de cada empresa. Los nombres de empresa son únicos dentro de su organización (ignorando mayúsculas, tildes y espacios), tanto al crear como al editar. Los colores se validan como `#RRGGBB` y el texto del avatar cambia a blanco o negro según el contraste (`readableTextColor`); un color válido nunca se rechaza por contraste. Quedan fuera: archivar o eliminar empresas, cambio de rol, eliminar personas, perfil y recuperación de contraseña.
+
+**Datos y plataforma.** Cambiar un nombre o color no modifica identificadores, publicaciones, comentarios, miembros, accesos ni invitaciones. El nombre de la organización no se copia a plataforma: el panel lo resuelve en vivo desde el espacio de trabajo. La validación de creación de organizaciones en plataforma compara con los nombres visibles. Limitación: el nombre guardado en plataforma para la organización vinculada conserva su valor de semilla y no se actualiza; solo se usaría si el almacén de trabajo no estuviera disponible.
+
+**Conflictos.** La detección es por los campos editados: cada guardado envía solo lo modificado junto con los valores base de esos campos. Un cambio ajeno en publicaciones, comentarios, accesos u otras empresas no impide guardar. Ante un conflicto o un fallo transitorio, el diálogo conserva el borrador, refresca los datos, muestra el valor actual y solo reintenta cuando se pulsa «Reintentar». El botón de envío dice «Guardar» ante errores de validación o permisos.
+
+**Comprobado en navegador de escritorio emulado (24 oct 2026, servidor local 5174).**
+- Renombrar la organización a «Estudio Aurora» se reflejó en el menú, en Equipo, en la página de una invitación y en el panel de plataforma, también tras recargar. El nombre guardado en plataforma no cambió y su revisión tampoco.
+- En «Nueva organización» (plataforma), el nombre nuevo (también escrito con otras mayúsculas y espacios) y el de otra organización se rechazaron como duplicados; el nombre anterior quedó libre. Enviar el formulario completo con el nombre duplicado no modificó ningún almacén.
+- Con dos pestañas del mismo origen, un cambio de color y de nombre se propagó a la otra sin recargar. Al editar el mismo nombre en ambas, la segunda conservó su borrador, mostró el valor actual y no sobrescribió; el reintento manual guardó. Un comentario creado en una pestaña no provocó conflicto al guardar un ajuste de empresa desde la otra.
+- Por URL directa, un trabajador y un cliente son redirigidos desde `/ajustes` y no ven el enlace.
+- Solo con teclado: abrir con Enter, editar, validar con Enter (error, `aria-invalid` y foco en el campo), guardar con Enter, Escape con y sin cambios, «Descartar cambios» y «Seguir editando» con Tab y Enter, trampa de foco que cicla dentro del diálogo y retorno del foco al botón de origen.
+- Los datos modificados en estas pruebas se restauraron; no se restableció la demostración.
+- Resultados de los bloques anteriores (A y B): lógica con pruebas automáticas y pantalla en 375, 390, 768, 1280 y 1440 px sin desbordamiento, con colores claros y oscuros.
+
+**Límites y pendientes.**
+- Todo es local al navegador y origen; no hay backend, autenticación real ni sincronización entre dispositivos. Un backend futuro debe autorizar cada cambio y garantizar unicidad.
+- localStorage no ofrece compare-and-swap: el lease reduce la ventana de escrituras simultáneas, pero no la elimina. La competencia estricta entre dos escrituras intercaladas está cubierta solo por pruebas automáticas con dos instancias; en navegador se verificó el conflicto secuencial entre dos pestañas.
+- No se probó el selector de color nativo del sistema solo con teclado (se cambió el color por programación), ni lectores de pantalla ni dispositivos reales.
+- El aviso de éxito persiste hasta «Entendido» y se acumula por cada guardado consecutivo.
+- La comprobación visual de los diálogos de Ajustes se hizo en navegador emulado; la regresión visual completa de vistas anteriores se apoya en las pruebas automáticas.

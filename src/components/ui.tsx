@@ -1,3 +1,4 @@
+import { readableTextColor } from '../lib/color';
 import { restorePendingWorkspaceFocus } from '../lib/recoveryFocus';
 import { useEffect, useId, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { useDialogViewport } from '../lib/useDialogViewport';
@@ -6,10 +7,13 @@ import { useSheetScrollLock } from '../lib/useSheetScrollLock';
 import { X, Image, Layers, Film, CirclePlay } from 'lucide-react';
 import type { PostFormat, PostStatus } from '../types';
 export function Button({ className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement>) { return <button className={`button ${className}`} {...props}/>; }
+// Función pura exportada para verificar el contraste de todos los avatares.
+// eslint-disable-next-line react-refresh/only-export-components
+export const avatarStyle = (color: string) => ({ background: color, color: readableTextColor(color) });
 export function Avatar({ name, color = '#5753c9' }: {
     name: string;
     color?: string;
-}) { return <span className="avatar" style={{ background: color }} aria-hidden="true">{name.split(' ').slice(0, 2).map(n => n[0]).join('')}</span>; }
+}) { return <span className="avatar" style={avatarStyle(color)} aria-hidden="true">{name.split(' ').slice(0, 2).map(n => n[0]).join('')}</span>; }
 export function StatusBadge({ status }: {
     status: PostStatus;
 }) { return <span className={`status status-${status.replace(' ', '-')}`}><span aria-hidden="true">●</span> {status}</span>; }

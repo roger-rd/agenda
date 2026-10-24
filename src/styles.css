@@ -1273,3 +1273,18 @@ main[tabindex="-1"]:focus, main[tabindex="-1"]:focus-visible { outline: none; }
 .invitation-card h1 { font-size: clamp(1.4rem, 5vw, 2rem); }
 .demo-mode select { width: 100%; min-width: 0; }
 .invitation-actions a { min-height: 44px; display: inline-flex; align-items: center; }
+
+/* Ajustes comparte las tarjetas y la hoja adaptable de Equipo. */
+.workspace-dot { border: 1px solid var(--muted, #777); }
+.settings-page > section { margin-bottom: 28px; }
+.settings-organization, .settings-company, .settings-color { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.settings-organization { justify-content: space-between; flex-wrap: wrap; }
+.settings-company .avatar { flex-shrink: 0; }
+.settings-dialog input:not([type="color"]) { width: 100%; min-width: 0; }
+.settings-dialog input[type="color"] { width: 64px; height: 44px; padding: 4px; }
+.settings-dialog label { display: block; margin-top: 12px; }
+.settings-dialog p { overflow-wrap: anywhere; }
+@media (max-width: 1023px) {
+  .settings-page .button, .settings-dialog input { min-height: 44px; }
+  .settings-dialog .modal-actions { flex-wrap: wrap; }
+}

@@ -1,6 +1,9 @@
 import type { Role } from '../types';
-export type Action = 'viewTeam' | 'manageInvitations' | 'manageTeamAccess' | 'createPost' | 'editPost' | 'deletePost' | 'comment' | 'changeStatus' | 'createCompany' | 'viewCompanyPanel' | 'viewOrganization' | 'viewTeamVisibility' | 'viewAllCompanies' | 'viewHiddenPosts' | 'resetDemo';
+export type Action = 'viewSettings' | 'editOrganization' | 'editCompany' | 'viewTeam' | 'manageInvitations' | 'manageTeamAccess' | 'createPost' | 'editPost' | 'deletePost' | 'comment' | 'changeStatus' | 'createCompany' | 'viewCompanyPanel' | 'viewOrganization' | 'viewTeamVisibility' | 'viewAllCompanies' | 'viewHiddenPosts' | 'resetDemo';
 const rules: Record<Action, readonly Role[]> = {
+  viewSettings: ['community_manager'],
+  editOrganization: ['community_manager'],
+  editCompany: ['community_manager'],
   viewTeam: ['community_manager'],
   manageInvitations: ['community_manager'],
   manageTeamAccess: ['community_manager'],

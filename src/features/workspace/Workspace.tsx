@@ -1,10 +1,11 @@
+import { Settings } from '../settings/Settings';
 import { ACCESS_RESTORED } from '../access/accessMessages';
 import { useNavigationDrawer } from './useNavigationDrawer';
 import { ProfileMenu } from './ProfileMenu';
 import { restorePendingWorkspaceFocus } from '../../lib/recoveryFocus';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useMatch } from 'react-router';
-import { CalendarDays, Building2, ChevronDown, Menu, X } from 'lucide-react';
+import { Settings as SettingsIcon, CalendarDays, Building2, ChevronDown, Menu, X } from 'lucide-react';
 import { actions, getStorageWarning, useStore } from '../../store';
 import { selectCompanies, selectCompany } from '../../store/selectors';
 import { can } from '../../store/permissions';
@@ -59,7 +60,7 @@ export function Workspace({ accessRestored = false, focusAfterBlock = false }: {
           <ChevronDown size={13} />
         </div>
       </div>
-      <nav>{can(s.role, 'viewTeam') && <Link to="/equipo" onClick={closeMenu}><Building2 size={18} />Equipo</Link>}{panel && <Link to="/empresas" onClick={closeMenu}>
+      <nav>{can(s.role, 'viewSettings') && <Link to="/ajustes" onClick={closeMenu}><SettingsIcon size={18} />Ajustes</Link>}{can(s.role, 'viewTeam') && <Link to="/equipo" onClick={closeMenu}><Building2 size={18} />Equipo</Link>}{panel && <Link to="/empresas" onClick={closeMenu}>
         <Building2 size={18} />Empresas</Link>}{active && <Link to={`/empresa/${active.id}`} onClick={closeMenu}>
           <CalendarDays size={18} />Calendario</Link>}</nav>
       <ProfileMenu onNavigate={closeMenu} onReset={() => {
@@ -88,6 +89,7 @@ export function Workspace({ accessRestored = false, focusAfterBlock = false }: {
           <p>{ACCESS_RESTORED}</p><Button onClick={() => { setNoticeDismissed(true); main.current?.focus({ preventScroll: true }); }}>Entendido</Button>
         </div>}
         <Routes>
+          <Route path="/ajustes" element={can(s.role, 'viewSettings') ? <Settings /> : <Navigate to={home} replace />} />
           <Route path="/equipo" element={can(s.role, 'viewTeam') ? <Team /> : <Navigate to={home} replace />} />
           <Route path="/sin-empresas" element={<div className="empty"><h1>Sin empresas asignadas</h1><p>Pide acceso al community manager.</p></div>} />
           <Route path="/empresas" element={panel ? <Companies /> : <Navigate to={home} replace />} />

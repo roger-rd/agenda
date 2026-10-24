@@ -9,6 +9,7 @@ import { restoreWorkspace, mergeShared, normalizeSession } from './migration';
 import { acquireLease } from './sync';
 import * as operations from './operations';
 import * as invitations from './invitations';
+import * as settings from './settings';
 import * as team from './teamAccess';
 import { ACCESS_DENIED } from './accessGuard';
 export const WORKSPACE_KEY = 'agenda-demo-v2';
@@ -66,7 +67,7 @@ export function createWorkspaceStore(storage: StorageLike | undefined, options: 
     return conflict();
   }
   function allowed(s: State) { return options.getPlatform().accessAllowed(s.organization.id, s.activeUserId); }
-  const blocked = (): operations.Result => ({ ok: false, reason: ACCESS_DENIED });
+  const blocked = (): operations.Result => ({ ok: false, code: 'forbidden', reason: ACCESS_DENIED });
   function guarded(operation: (s: State) => operations.Result) {
     if (!allowed(state)) return blocked();
     return write(s => !allowed(s) ? blocked() : admin() ? invitations.failure('forbidden', 'La sesión administrativa no puede gestionar el espacio de trabajo.') : operation(s));
@@ -113,12 +114,9 @@ export function createWorkspaceStore(storage: StorageLike | undefined, options: 
     },
     setCompany: (id: string) => guarded(s => !s.authenticated ? invitations.failure('forbidden', 'Debes iniciar sesión en el espacio de trabajo.')
       : selectCompanies(s).some(c => c.id === id) ? { ok: true, state: { ...s, activeCompanyId: id } } : invitations.failure('forbidden', 'Empresa no disponible.')),
-    createCompany: (name: string, color: string) => guarded(s => {
-      if (!s.authenticated || !can(s.role, 'createCompany') || !name.trim())
-        return invitations.failure('forbidden', 'No tienes permiso o el nombre de empresa no es válido.');
-      return { ok: true, state: { ...s, companies: [...s.companies,
-        { id: crypto.randomUUID(), name: name.trim().slice(0, 80), color, organizationId: s.organization.id }] } };
-    }),
+    updateOrganization: (input: settings.OrganizationUpdate) => guarded(s => settings.updateOrganization(s, input, context())),
+    updateCompany: (input: settings.CompanyUpdate) => guarded(s => settings.updateCompany(s, input, context())),
+    createCompany: (name: string, color: string) => guarded(s => settings.createCompany(s, name, color, context())),
     reset: () => guarded(s => s.authenticated && can(s.role, 'resetDemo')
       ? { ok: true, state: { ...generateDemo(), authenticated: true } }
       : invitations.failure('forbidden', 'No tienes permiso para restablecer la demostración.')),

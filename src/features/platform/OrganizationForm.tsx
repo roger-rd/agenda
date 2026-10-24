@@ -3,9 +3,10 @@ import { Button, Modal } from '../../components/ui';
 import { platformStore } from '../../platform/store';
 import { organizationFields, organizationResultError, SIMULATED_INVITATION_NOTICE, validateOrganizationField,
   type OrganizationErrors, type OrganizationInput } from '../../platform/validation';
+import type { WorkspaceDirectory } from '../../platform/directory';
 import type { PlatformState } from '../../platform/types';
 
-export function OrganizationForm({ onClose, onSaved }: { onClose: () => void; onSaved: (state: PlatformState) => void }) {
+export function OrganizationForm({ onClose, onSaved, workspace }: { workspace: WorkspaceDirectory; onClose: () => void; onSaved: (state: PlatformState) => void }) {
   const [draft, setDraft] = useState<OrganizationInput>({ name: '', managerName: '', email: '' });
   const [errors, setErrors] = useState<OrganizationErrors>({});
   const [attempted, setAttempted] = useState(false);
@@ -20,12 +21,12 @@ export function OrganizationForm({ onClose, onSaved }: { onClose: () => void; on
       event.preventDefault(); setAttempted(true); setMessage('');
       const next: OrganizationErrors = {};
       for (const field of organizationFields) {
-        const error = validateOrganizationField(platformStore.getState(), field, draft[field]);
+        const error = validateOrganizationField(platformStore.getState(), field, draft[field], workspace);
         if (error) next[field] = error;
       }
       setErrors(next);
       if (Object.keys(next).length) { focus(Object.keys(next)[0]); return; }
-      const result = platformStore.createOrganization(draft);
+      const result = platformStore.createOrganization(draft, workspace);
       if (result.ok) { onSaved(result.value); onClose(); }
       else {
         const error = organizationResultError(result);
@@ -41,10 +42,10 @@ export function OrganizationForm({ onClose, onSaved }: { onClose: () => void; on
           inputMode={field === 'email' ? 'email' : 'text'} autoCapitalize={field === 'email' ? 'none' : 'words'}
           spellCheck={false} autoComplete="off" value={draft[field]}
           aria-invalid={!!errors[field]} aria-describedby={errors[field] ? `organization-error-${field}` : undefined}
-          onBlur={() => { if (attempted) setErrors(previous => ({ ...previous, [field]: validateOrganizationField(platformStore.getState(), field, draft[field]) })); }}
+          onBlur={() => { if (attempted) setErrors(previous => ({ ...previous, [field]: validateOrganizationField(platformStore.getState(), field, draft[field], workspace) })); }}
           onChange={event => {
             const value = event.target.value; setDraft(previous => ({ ...previous, [field]: value })); setMessage('');
-            if (attempted) setErrors(previous => ({ ...previous, [field]: validateOrganizationField(platformStore.getState(), field, value) }));
+            if (attempted) setErrors(previous => ({ ...previous, [field]: validateOrganizationField(platformStore.getState(), field, value, workspace) }));
           }} />
         {errors[field] && <span className="field-error" id={`organization-error-${field}`}>{errors[field]}</span>}
       </label>)}

@@ -29,7 +29,7 @@ test('todas las escrituras públicas bloqueadas sin mutación; sesiones, cambio 
         () => actions.deletePost(post.id), () => actions.changeStatus(post.id, 'Subido'), () => actions.addComment(post.id, 'No debe guardarse'),
         () => actions.createCompany('No debe crearse', '#000000'), () => actions.setCompany('company-1'), () => actions.reset()];
       for (const attempt of attempts) {
-        assert.deepEqual(attempt(), { ok: false, reason: 'Tu acceso a esta organización está suspendido.' });
+        assert.deepEqual(attempt(), { ok: false, code: 'forbidden', reason: 'Tu acceso a esta organización está suspendido.' });
         assert.equal(getState(), before); assert.equal(JSON.stringify(getState()), snapshot); assert.equal(writes, count);
         assert.deepEqual([...attachmentFiles], files);
       }
