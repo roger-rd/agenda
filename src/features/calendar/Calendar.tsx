@@ -11,7 +11,7 @@ import { todayKey } from '../../lib/dates';
 import { movePeriod, periodLabel, readPeriod, resolveView, viewLabels, type View } from '../../lib/periods';
 import { useStore } from '../../store';
 import { can } from '../../store/permissions';
-import { emptyFilters, selectCompany, selectRequestedPost, selectFilteredPosts, selectViewPosts } from '../../store/selectors';
+import { emptyFilters, responsibleLabel, selectCompany, selectRequestedPost, selectFilteredPosts, selectViewPosts } from '../../store/selectors';
 import { Board } from '../board/Board';
 import { FiltersBar } from './FiltersBar';
 import { MonthView } from './MonthView/MonthView';
@@ -63,9 +63,9 @@ export function Calendar({ companyId }: { companyId: string }) {
       || (filters.responsible && filters.responsible !== post.responsibleId)));
   }
   function clearFilters() { setFilters(emptyFilters); setSaveNotice(false); }
-  const props = { onCreate: can(state.role, 'createPost') ? setCreatingDay : undefined, reference, posts, users: state.users, onOpen: (id: string) => patch({ publicacion: id }) };
+  const props = { onCreate: can(state.role, 'createPost') ? setCreatingDay : undefined, reference, posts, users: state.users.map(user => ({ ...user, name: responsibleLabel(state, companyId, user.id) })), onOpen: (id: string) => patch({ publicacion: id }) };
   if (!company) return <div className="empty">
-    <h1>No disponible</h1>
+    <h1>Empresa no disponible</h1>
     <p>No tienes acceso a este espacio.</p>{location.state?.unavailablePost && <p role="status">Publicación no disponible</p>}{detail && <PostDetail onSaved={onSaved} id={detail} companyId={companyId} onClose={() => patch({ publicacion: null })} />}</div>;
   return <section className={`calendar-page ${view !== 'tablero' ? 'responsive-calendar' : 'responsive-board'}`}>
     {location.state?.unavailablePost && <p className="notice" role="status">Publicación no disponible</p>}

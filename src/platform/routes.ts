@@ -13,3 +13,7 @@ export const ORGANIZATION_DETAIL_PATTERN = /^\/plataforma\/organizaciones\/([A-Z
 export function organizationDetailId(pathname: string) {
   return ORGANIZATION_DETAIL_PATTERN.exec(pathname)?.[1] ?? null;
 }
+
+export const INVITATION_PATTERN = /^\/invitacion\/([A-Za-z0-9_-]{1,128})\/?$/;
+export const invitationCode = (pathname: string) => INVITATION_PATTERN.exec(pathname.split(/[?#]/, 1)[0])?.[1] ?? '';
+export const isInvitationRoute = (path: string) => path === '/invitacion' || path.startsWith('/invitacion/');

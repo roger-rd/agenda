@@ -37,6 +37,7 @@ export type WorkspaceAccessCauses = ReturnType<typeof accessCausesForWorkspace>;
 // Solo decisiones de lectura para invitaciones; no entrega motivos ni directorios privados.
 export function workspacePolicy(state: PlatformState) {
   return {
+    memberSuspended: (organizationId: string, userId: string) => state.memberAccess.some(a => a.organizationId === organizationId && a.userId === userId && a.status === 'suspended'),
     organizationActive: (id: string) => state.organizations.some(o => o.id === id && o.status === 'active'),
     emailExists: (email: string) => state.members.some(m => m.email.trim().toLowerCase() === email),
     accessAllowed: (organizationId: string, userId: string) => accessForWorkspace(state, organizationId, userId).allowed,

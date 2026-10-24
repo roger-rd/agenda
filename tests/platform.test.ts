@@ -157,7 +157,10 @@ test('plataforma no lee contenido; roles y tabla de permisos del espacio de trab
   }
   for (const directory of ['platform/', 'auth/', 'features/platform/']) inspect(new URL(`../src/${directory}`, import.meta.url));
   const profile = readFileSync(new URL('../src/features/workspace/DemoMode.tsx', import.meta.url), 'utf8');
-  assert.deepEqual([...profile.matchAll(/<option value="([^"]+)"/g)].map(match => match[1]), ['community_manager', 'worker', 'client']);
+  assert.match(profile, /selectDemoGroups\(state, actions.memberSuspended\)/);
+  assert.match(profile, /<optgroup/);
+  assert.match(profile, /group.people.map/);
+  assert.match(profile, /value=\{person.id\}/);
   assert.doesNotMatch(profile, /platform_admin|platform-admin/);
   const types = readFileSync(new URL('../src/types/index.ts', import.meta.url), 'utf8');
   assert.match(types, /export type Role = 'community_manager' \| 'worker' \| 'client';/);

@@ -8,7 +8,7 @@ import { can } from '../../store/permissions';
 import { Button, FormatBadge, Modal } from '../../components/ui';
 import { zonedFormat } from '../../lib/dates';
 import { useStore } from '../../store';
-import { selectPost } from '../../store/selectors';
+import { selectPost, responsibleLabel } from '../../store/selectors';
 import { StatusControl } from '../board/StatusControl';
 export function PostDetail({ id, companyId, onClose, onSaved }: { id: string; companyId: string; onClose: () => void; onSaved?: (post: Post) => void }) {
   const [dirtyComment, setDirtyComment] = useState(false);
@@ -30,7 +30,7 @@ export function PostDetail({ id, companyId, onClose, onSaved }: { id: string; co
         <dt>Fecha y hora</dt>
         <dd>{zonedFormat(post.scheduledAt, "d 'de' MMMM yyyy · HH:mm")} (Santiago)</dd>
         <dt>Responsable</dt>
-        <dd>{state.users.find(u => u.id === post.responsibleId)?.name}</dd>
+        <dd>{responsibleLabel(state, companyId, post.responsibleId)}</dd>
         <dt>Visibilidad</dt>
         <dd>{post.visible_para_cliente ? 'Visible para el cliente y el equipo' : 'Solo equipo'}</dd>
         {post.confirmadoEn && <>

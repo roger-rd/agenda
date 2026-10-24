@@ -9,6 +9,7 @@ import { restoreWorkspace, mergeShared, normalizeSession } from './migration';
 import { acquireLease } from './sync';
 import * as operations from './operations';
 import * as invitations from './invitations';
+import * as team from './teamAccess';
 import { ACCESS_DENIED } from './accessGuard';
 export const WORKSPACE_KEY = 'agenda-demo-v2';
 interface Options {
@@ -28,11 +29,11 @@ export function createWorkspaceStore(storage: StorageLike | undefined, options: 
   const notify = () => listeners.forEach(l => l());
   function refresh() {
     try {
-      if (!storage) return;
+      if (!storage) return false;
       const raw = storage.getItem(WORKSPACE_KEY);
-      if (raw === lastRaw) return;
-      state = mergeShared(restoreWorkspace(raw), state); lastRaw = raw; notify();
-    } catch { warning = 'No se pudo actualizar el almacenamiento.'; }
+      if (raw === lastRaw) return true;
+      state = mergeShared(restoreWorkspace(raw), state); lastRaw = raw; notify(); return true;
+    } catch { warning = 'No se pudo actualizar el almacenamiento.'; return false; }
   }
   const conflict = () => invitations.failure('conflict', 'Los datos cambiaron en otra pestaña. Inténtalo de nuevo.');
   function write(operation: (s: State) => operations.Result): operations.Result {
@@ -50,7 +51,7 @@ export function createWorkspaceStore(storage: StorageLike | undefined, options: 
         const result = operation(fresh);
         if (!result.ok) { if (raw !== lastRaw) { state = fresh; lastRaw = raw; notify(); } return result; }
         if (!lease.owns() || storage.getItem(WORKSPACE_KEY) !== raw) continue;
-        if (result.state === fresh) return { ok: true, state };
+        if (result.state === fresh) { state = fresh; lastRaw = raw; notify(); return { ok: true, state }; }
         const next = normalizeSession({ ...result.state, revision: baseRevision + 1 });
         const serialized = operations.serializeState(next);
         storage.setItem(WORKSPACE_KEY, serialized);
@@ -87,6 +88,19 @@ export function createWorkspaceStore(storage: StorageLike | undefined, options: 
       activeUserId: s.users.find(u => u.id === profileIds.community_manager)?.id ?? s.users.find(u => u.role === 'community_manager')?.id ?? '' } }));
   }
   const actions = {
+    refresh,
+    inspectInvitation: (code: string) => invitations.inspectInvitation(state, code, context()),
+    enterAs: (userId: string): operations.Result => {
+      options.getPlatform();
+      return write(s => {
+        const user = s.users.find(u => u.id === userId);
+        if (!user) return invitations.failure('not_found', 'Persona no disponible.');
+        options.closeAdminSession?.();
+        const next = { ...s, authenticated: true, activeUserId: user.id, role: user.role };
+        return { ok: true, state: { ...next, activeCompanyId: selectCompanies(next)[0]?.id ?? '' } };
+      });
+    },
+    memberSuspended: (userId: string) => options.getPlatform().memberSuspended(state.organization.id, userId),
     createPost: (input: PostInput) => guarded(s => operations.savePost(s, input)),
     updatePost: (id: string, input: PostInput) => guarded(s => operations.savePost(s, input, id)),
     deletePost: (id: string) => guarded(s => operations.deletePost(s, id)),
@@ -98,7 +112,7 @@ export function createWorkspaceStore(storage: StorageLike | undefined, options: 
       return setActiveUser(state.users.find(u => u.id === profileIds[role] && u.role === role)?.id ?? state.users.find(u => u.role === role)?.id ?? '');
     },
     setCompany: (id: string) => guarded(s => !s.authenticated ? invitations.failure('forbidden', 'Debes iniciar sesión en el espacio de trabajo.')
-      : { ok: true, state: selectCompanies(s).some(c => c.id === id) ? { ...s, activeCompanyId: id } : s }),
+      : selectCompanies(s).some(c => c.id === id) ? { ok: true, state: { ...s, activeCompanyId: id } } : invitations.failure('forbidden', 'Empresa no disponible.')),
     createCompany: (name: string, color: string) => guarded(s => {
       if (!s.authenticated || !can(s.role, 'createCompany') || !name.trim())
         return invitations.failure('forbidden', 'No tienes permiso o el nombre de empresa no es válido.');
@@ -111,7 +125,10 @@ export function createWorkspaceStore(storage: StorageLike | undefined, options: 
     createInvitation: (input: invitations.InvitationInput) => guarded(s => invitations.createInvitation(s, input, context())),
     revokeInvitation: (id: string) => guarded(s => invitations.changeInvitation(s, id, 'revoke', context())),
     renewInvitation: (id: string, days?: 1 | 7 | 30) => guarded(s => invitations.changeInvitation(s, id, 'renew', context(), days)),
-    acceptInvitation: (code: string, input: { name: string }) => write(s => invitations.acceptInvitation(s, code, input, context())),
+    acceptInvitation: (code: string, input: { name: string; email: string }) => write(s => invitations.acceptInvitation(s, code, input, context())),
+    setCompanyAccess: (userId: string, ids: string[], revision?: number) => guarded(s => revision !== undefined && revision !== s.revision ? conflict() : team.setCompanyAccess(s, userId, ids, admin())),
+    assignCompanyAccess: (userId: string, companyId: string) => guarded(s => team.changeCompanyAccess(s, userId, companyId, true, admin())),
+    removeCompanyAccess: (userId: string, companyId: string) => guarded(s => team.changeCompanyAccess(s, userId, companyId, false, admin())),
     removeWorkerCompanyAccess: (userId: string, companyId: string) => guarded(s => invitations.removeWorkerCompanyAccess(s, userId, companyId, admin())),
     listInvitations: (): operations.Result => {
       refresh();

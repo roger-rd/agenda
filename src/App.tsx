@@ -13,26 +13,28 @@ import { initialRecovery, updateRecovery } from './features/access/recovery';
 import { APP_NAME } from './lib/config';
 import { Login } from './features/auth/Login';
 import { Workspace } from './features/workspace/Workspace';
+import { InvitationPage } from './features/invitation/InvitationPage';
 import { PlatformShell } from './features/platform/PlatformShell';
 
 export function App() {
   const state = useStore();
   const session = useActiveSession();
   const location = useLocation();
+  const { view, redirectTo } = resolveRoute(session, location.pathname + location.search + location.hash);
   const platform = useSyncExternalStore(platformStore.subscribe, platformStore.getState);
   const userIds = JSON.stringify(state.users.map(u => u.id).sort());
-  useEffect(() => { platformStore.reconcileWithWorkspace(JSON.parse(userIds)); }, [userIds]);
+  useEffect(() => { if (view !== 'invitation') platformStore.reconcileWithWorkspace(JSON.parse(userIds)); }, [userIds, view]);
   useLayoutEffect(() => { platformStore.refresh(); }, [session, state.role, location.key]);
   const causes = accessCausesForWorkspace(platform, workspaceOrganizationId(state), currentUserId(state));
   const blocked = session === 'workspace' && resolveWorkspaceGate(session, causes).access === 'blocked';
   const [accessTransition, setAccessTransition] = useState(initialRecovery);
   const nextRecovery = updateRecovery(accessTransition, session === 'workspace' ? currentUserId(state) : null, blocked);
   if (nextRecovery !== accessTransition) setAccessTransition(nextRecovery);
-  const { view, redirectTo } = resolveRoute(session, location.pathname + location.search + location.hash);
   const pendingFocus = useRef(false);
   const previousView = useRef(view);
   useLayoutEffect(() => {
-    if (blocked) document.title = `Acceso suspendido · ${APP_NAME}`;
+    if (view === 'invitation') document.title = `Invitación · ${APP_NAME}`;
+    else if (blocked) document.title = `Acceso suspendido · ${APP_NAME}`;
     else if (view !== 'platform' || !organizationDetailId(location.pathname)) document.title = view === 'platform' ? `${isOrganizationsRoute(location.pathname) ? 'Organizaciones · ' : ''}Administración · ${APP_NAME}` : APP_NAME;
     if (redirectTo) pendingFocus.current = true;
     else if (pendingFocus.current || previousView.current !== view) {
@@ -42,7 +44,8 @@ export function App() {
     previousView.current = view;
   }, [view, redirectTo, location.key, location.pathname, blocked, accessTransition.restored]);
   if (redirectTo) return <Navigate to={redirectTo} replace />;
+  if (view === 'invitation') return <InvitationPage key={location.pathname} />;
   if (view === 'platform') return <PlatformShell />;
-  if (blocked) return <AccessSuspended causes={causes} user={selectUser(state)} onRoleChange={actions.setRole} />;
-  return view === 'workspace' ? <Workspace key={state.role} accessRestored={accessTransition.restored} focusAfterBlock={accessTransition.returning} /> : <Login />;
+  if (blocked) return <AccessSuspended causes={causes} user={selectUser(state)} onUserChange={actions.setActiveUser} />;
+  return view === 'workspace' ? <Workspace key={state.activeUserId} accessRestored={accessTransition.restored} focusAfterBlock={accessTransition.returning} /> : <Login />;
 }

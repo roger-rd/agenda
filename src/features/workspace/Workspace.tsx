@@ -11,6 +11,7 @@ import { can } from '../../store/permissions';
 import { APP_NAME } from '../../lib/config';
 import { zonedFormat } from '../../lib/dates';
 import { Avatar, Button, Modal } from '../../components/ui';
+import { Team } from '../team/Team';
 import { Companies } from '../companies/Companies';
 import { Calendar } from '../calendar/Calendar';
 function CompanyRoute() { const { id = '' } = useParams(); return <Calendar key={id} companyId={id} />; }
@@ -31,7 +32,7 @@ export function Workspace({ accessRestored = false, focusAfterBlock = false }: {
   const active = selectCompany(s, route?.params.id ?? s.activeCompanyId) ?? companies[0];
   const [reset, setReset] = useState(false);
   const panel = can(s.role, 'viewCompanyPanel');
-  const home = panel ? '/empresas' : `/empresa/${active?.id}`;
+  const home = panel ? '/empresas' : active ? `/empresa/${active.id}` : '/sin-empresas';
   return <div className="app-shell">
     {open && <div className="drawer-overlay" aria-hidden="true" onClick={closeMenu} />}
     <aside id="navigation-menu" ref={drawer} tabIndex={-1} className={`sidebar ${open ? 'drawer-open' : ''}`}
@@ -53,12 +54,12 @@ export function Workspace({ accessRestored = false, focusAfterBlock = false }: {
         <label htmlFor="company-switch">EMPRESA ACTIVA</label>
         <div>
           <Avatar name={active?.name ?? 'Empresa'} color={active?.color} />
-          <select id="company-switch" value={active?.id ?? ''} onChange={e => { closeMenu(); actions.setCompany(e.target.value); navigate(`/empresa/${e.target.value}`); }}
-          >{companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+          <select id="company-switch" disabled={!companies.length} value={active?.id ?? ''} onChange={e => { closeMenu(); actions.setCompany(e.target.value); navigate(`/empresa/${e.target.value}`); }}
+          >{!companies.length && <option value="">Sin empresas asignadas</option>}{companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
           <ChevronDown size={13} />
         </div>
       </div>
-      <nav>{panel && <Link to="/empresas" onClick={closeMenu}>
+      <nav>{can(s.role, 'viewTeam') && <Link to="/equipo" onClick={closeMenu}><Building2 size={18} />Equipo</Link>}{panel && <Link to="/empresas" onClick={closeMenu}>
         <Building2 size={18} />Empresas</Link>}{active && <Link to={`/empresa/${active.id}`} onClick={closeMenu}>
           <CalendarDays size={18} />Calendario</Link>}</nav>
       <ProfileMenu onNavigate={closeMenu} onReset={() => {
@@ -87,6 +88,8 @@ export function Workspace({ accessRestored = false, focusAfterBlock = false }: {
           <p>{ACCESS_RESTORED}</p><Button onClick={() => { setNoticeDismissed(true); main.current?.focus({ preventScroll: true }); }}>Entendido</Button>
         </div>}
         <Routes>
+          <Route path="/equipo" element={can(s.role, 'viewTeam') ? <Team /> : <Navigate to={home} replace />} />
+          <Route path="/sin-empresas" element={<div className="empty"><h1>Sin empresas asignadas</h1><p>Pide acceso al community manager.</p></div>} />
           <Route path="/empresas" element={panel ? <Companies /> : <Navigate to={home} replace />} />
           <Route path="/empresa/:id" element={<CompanyRoute />} />
           <Route path="/" element={<Navigate to={home} replace />} />

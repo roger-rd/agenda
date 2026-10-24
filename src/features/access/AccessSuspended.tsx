@@ -1,13 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { LockKeyhole } from 'lucide-react';
 import type { WorkspaceAccessCauses } from '../../platform/access';
-import type { User, Role } from '../../types';
+import type { User } from '../../types';
 import { leaveWorkspace } from '../../auth/sessions';
 import { Button } from '../../components/ui';
 import { DemoMode } from '../workspace/DemoMode';
 import { ACCESS_CONTACT, ACCESS_SIMULATION, accessMessage } from './accessMessages';
-export function AccessSuspended({ causes, user, onRoleChange }: {
-  causes: WorkspaceAccessCauses; user: User; onRoleChange: (role: Role) => void;
+export function AccessSuspended({ causes, user, onUserChange }: {
+  causes: WorkspaceAccessCauses; user: User; onUserChange: (userId: string) => void;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { heading.current?.focus({ preventScroll: true }); }, [user.id]);
@@ -19,7 +19,7 @@ export function AccessSuspended({ causes, user, onRoleChange }: {
       <p role="alert">{accessMessage(causes)}</p>
       <p>{ACCESS_CONTACT}</p>
       <p>Estás probando como: <strong>{user.name}</strong> ({roleName})</p>
-      <DemoMode role={user.role} onChange={onRoleChange} />
+      <DemoMode onChange={onUserChange} />
       <p className="notice">{ACCESS_SIMULATION}</p>
       <Button onClick={leaveWorkspace}>Salir</Button>
     </section>

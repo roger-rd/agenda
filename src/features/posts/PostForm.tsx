@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Modal } from '../../components/ui';
 import { actions, useStore } from '../../store';
-import { selectAssignableUsers } from '../../store/selectors';
+import { selectAssignableUsers, isResponsibleAuthorized, responsibleLabel } from '../../store/selectors';
 import { can } from '../../store/permissions';
 import { statuses } from '../../store/transitions';
 import { zonedFormat } from '../../lib/dates';
@@ -58,6 +58,7 @@ export function PostForm({ companyId, day, post, onClose, onDeleted, onSaved }: 
   function error(key: keyof Draft) {
     return errors[key] && <span className="field-error" id={`error-${key}`}>{errors[key]}</span>;
   }
+  const unauthorized = !isResponsibleAuthorized(state, companyId, draft.responsibleId);
   return <Modal title={post ? 'Editar publicación' : 'Nueva publicación'} side adaptive className="post-dialog post-form-dialog"
     onClose={close} initialFocus="#post-title">
     <form ref={form} noValidate onSubmit={event => {
@@ -100,11 +101,12 @@ export function PostForm({ companyId, day, post, onClose, onDeleted, onSaved }: 
         <label>Hora prevista (Santiago)<input {...field('time')} type="time" required value={draft.time}
           onChange={e => change('time', e.target.value)} />{error('time')}</label>
       </div>
-      <label>Responsable<select {...field('responsibleId')} value={draft.responsibleId}
+      <label>Responsable<select {...field('responsibleId')} aria-invalid={unauthorized || !!errors.responsibleId} aria-describedby={unauthorized ? 'responsible-access-error' : undefined} value={draft.responsibleId}
         onChange={e => change('responsibleId', e.target.value)}>
         <option value="">Selecciona un responsable</option>
+        {unauthorized && draft.responsibleId && <option value={draft.responsibleId} disabled>{responsibleLabel(state, companyId, draft.responsibleId)}</option>}
         {selectAssignableUsers(state, companyId).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-      </select>{error('responsibleId')}</label>
+      </select>{unauthorized && <span id="responsible-access-error" className="field-error">Selecciona un responsable autorizado para esta empresa.</span>}{error('responsibleId')}</label>
       <label className="switch-label"><input type="checkbox" role="switch"
         checked={draft.visible_para_cliente} onChange={e => change('visible_para_cliente', e.target.checked)} />
         Visible para el cliente</label>

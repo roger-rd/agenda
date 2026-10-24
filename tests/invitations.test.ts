@@ -75,7 +75,7 @@ test('administrador no gestiona ni lee invitaciones ni acepta con sesión activa
   for (const attempt of [() => f.store.actions.createInvitation(input), () => f.store.actions.revokeInvitation(f.invitation.id),
     () => f.store.actions.renewInvitation(f.invitation.id), () => f.store.actions.removeWorkerCompanyAccess('ana', 'company-0'), () => f.store.actions.listInvitations()])
     unchanged(f, attempt, 'forbidden');
-  unchanged(f, () => f.store.actions.acceptInvitation(f.invitation.code, { name: 'Nueva' }), 'session_active');
+  unchanged(f, () => f.store.actions.acceptInvitation(f.invitation.code, { email: ' NUEVA@example.cl ', name: 'Nueva' }), 'session_active');
 });
 for (const days of [undefined, 1, 7, 30] as const) test(`vigencia ${days ?? 'predeterminada'}`, () => {
   const f = fixture(), i = success(f.store.actions.createInvitation({ ...input, validityDays: days })).invitations[0];
@@ -95,15 +95,15 @@ test('códigos aleatorios únicos de 128 bits, enlace solo con código y aceptac
   assert.equal(new Set(invitations.map(i => i.code)).size, 12);
   assert.ok(invitations.every(i => /^[a-f0-9]{32}$/.test(i.code)));
   success(f.store.actions.logout()); const before = f.storage.writes.length, platform = structuredClone(f.platform);
-  const s = success(f.store.actions.acceptInvitation(invitations[0].code, { name: ' Nueva Persona ' }));
+  const s = success(f.store.actions.acceptInvitation(invitations[0].code, { email: ' NUEVA@example.cl ', name: ' Nueva Persona ' }));
   assert.equal(f.storage.writes.slice(before).filter(k => k === key).length, 1);
   const user = s.users.at(-1)!;
   assert.equal(user.name, 'Nueva Persona'); assert.equal(user.email, 'nueva@example.cl'); assert.equal(user.example, false);
   assert.deepEqual(s.memberships.filter(m => m.userId === user.id).map(m => m.companyId), input.companyIds);
   assert.equal(invitationStatus(s.invitations[0]), 'usada'); assert.equal(s.authenticated, false);
   assert.deepEqual(f.platform, platform);
-  unchanged(f, () => f.store.actions.acceptInvitation(invitations[0].code, { name: 'Otra' }), 'used');
-  unchanged(f, () => f.store.actions.acceptInvitation(invitations[1].code, { name: 'Otra' }), 'existing_member');
+  unchanged(f, () => f.store.actions.acceptInvitation(invitations[0].code, { email: ' NUEVA@example.cl ', name: 'Otra' }), 'used');
+  unchanged(f, () => f.store.actions.acceptInvitation(invitations[1].code, { email: ' NUEVA@example.cl ', name: 'Otra' }), 'existing_member');
 });
 for (const cause of ['missing', 'expired', 'revoked', 'used', 'organization_suspended', 'organization_missing', 'company_removed', 'session', 'email', 'platform_email', 'name'] as const)
   test(`aceptación rechazada sin consumo ni registros parciales: ${cause}`, () => {
@@ -111,7 +111,7 @@ for (const cause of ['missing', 'expired', 'revoked', 'used', 'organization_susp
     if (cause === 'missing') code = 'missing';
     if (cause === 'expired') { f.setNow(Date.parse(f.invitation.expiresAt)); expected = 'expired'; }
     if (cause === 'revoked') { success(f.store.actions.login()); success(f.store.actions.revokeInvitation(f.invitation.id)); success(f.store.actions.logout()); expected = 'revoked'; }
-    if (cause === 'used') { success(f.store.actions.acceptInvitation(code, { name: 'Nueva' })); expected = 'used'; }
+    if (cause === 'used') { success(f.store.actions.acceptInvitation(code, { email: ' NUEVA@example.cl ', name: 'Nueva' })); expected = 'used'; }
     if (cause === 'organization_suspended') { f.platform.organizations.find(o => o.id === f.invitation.organizationId)!.status = 'suspended'; expected = 'organization_unavailable'; }
     if (cause === 'organization_missing') { f.platform.organizations = []; expected = 'organization_unavailable'; }
     if (cause === 'session') { success(f.store.actions.login()); expected = 'session_active'; }
@@ -123,7 +123,7 @@ for (const cause of ['missing', 'expired', 'revoked', 'used', 'organization_susp
       else { s.users[0].email = ' NUEVA@EXAMPLE.CL '; expected = 'existing_member'; }
       f.storage.setItem(key, JSON.stringify(s)); f.store.refresh();
     }
-    unchanged(f, () => f.store.actions.acceptInvitation(code, { name: cause === 'name' ? '' : 'Nueva' }), expected);
+    unchanged(f, () => f.store.actions.acceptInvitation(code, { email: ' NUEVA@example.cl ', name: cause === 'name' ? '' : 'Nueva' }), expected);
   });
 test('reinvitación de miembro suspendido conserva identidad, rol y suspensión', () => {
   const s = { ...generateDemo(), authenticated: true }; s.users.find(u => u.id === 'ana')!.email = 'NUEVA@example.cl';
@@ -138,7 +138,7 @@ test('renovar revoca código anterior; revocar y renovar validan vigencia, rol y
   const next = success(f.store.actions.renewInvitation(old.id, 30));
   assert.equal(invitationStatus(next.invitations[0]), 'revocada'); assert.notEqual(next.invitations[1].code, old.code);
   assert.equal(next.invitations[1].validityDays, 30);
-  success(f.store.actions.logout()); unchanged(f, () => f.store.actions.acceptInvitation(old.code, { name: 'Nueva' }), 'revoked');
+  success(f.store.actions.logout()); unchanged(f, () => f.store.actions.acceptInvitation(old.code, { email: ' NUEVA@example.cl ', name: 'Nueva' }), 'revoked');
 });
 test('retirada conserva contenido y responsable anterior; CM puede reasignar con validación', () => {
   const f = fixture(), s = f.store.getState(), post = s.posts.find(p => p.companyId === 'company-0' && p.responsibleId === 'ana')!;
@@ -165,10 +165,10 @@ test('aceptación simultánea intercalada sobre dos instancias: solo una gana y 
   const f = ready(), b = createWorkspaceStore(f.storage, f.options); let competing: Result | undefined;
   f.storage.hook = (writtenKey, raw) => {
     if (writtenKey !== `${key}:lock` || !JSON.parse(raw).expiresAt) return;
-    f.storage.hook = undefined; competing = b.actions.acceptInvitation(f.invitation.code, { name: 'B' });
+    f.storage.hook = undefined; competing = b.actions.acceptInvitation(f.invitation.code, { email: ' NUEVA@example.cl ', name: 'B' });
   };
-  success(f.store.actions.acceptInvitation(f.invitation.code, { name: 'A' })); error(competing!, 'conflict');
-  error(b.actions.acceptInvitation(f.invitation.code, { name: 'B' }), 'used');
+  success(f.store.actions.acceptInvitation(f.invitation.code, { email: ' NUEVA@example.cl ', name: 'A' })); error(competing!, 'conflict');
+  error(b.actions.acceptInvitation(f.invitation.code, { email: ' NUEVA@example.cl ', name: 'B' }), 'used');
   assert.equal(b.getState().users.filter(u => u.email === 'nueva@example.cl').length, 1);
   assert.equal(b.getState().memberships.length, generateDemo().memberships.length + 2);
 });
@@ -195,7 +195,7 @@ test('storage/focus/visibility conservan sesión local y normalizan empresa/pers
   b.dispose(); const before = b.getState(); success(f.store.actions.createCompany('Después', '#fff')); windowTarget.dispatchEvent(new Event('focus')); assert.equal(b.getState(), before);
 });
 test('directorio nuevo sin correos vinculados, invitaciones, códigos ni conteos; reconciliación solo huérfanos', () => {
-  const f = ready(), s = success(f.store.actions.acceptInvitation(f.invitation.code, { name: 'Nueva' }));
+  const f = ready(), s = success(f.store.actions.acceptInvitation(f.invitation.code, { email: ' NUEVA@example.cl ', name: 'Nueva' }));
   const directory = workspaceDirectory(s), resolved = resolveDirectory(f.platform, directory, s.organization.id);
   assert.deepEqual(resolved.members.at(-1), { userId: s.users.at(-1)!.id, name: 'Nueva', role: 'worker', example: false });
   for (const value of [directory, resolved]) assert.doesNotMatch(JSON.stringify(value), /invitations|posts|comments|email|nueva@example|planned|pending|code/);
@@ -206,5 +206,68 @@ test('directorio nuevo sin correos vinculados, invitaciones, códigos ni conteos
 });
 test('almacenamiento no disponible no informa éxito ni deja cambios en memoria', () => {
   const f = fixture(), s = createWorkspaceStore(undefined, f.options), before = s.getState();
-  error(s.actions.acceptInvitation('x', { name: 'Nueva' }), 'storage_unavailable'); assert.equal(s.getState(), before);
+  error(s.actions.acceptInvitation('x', { email: ' NUEVA@example.cl ', name: 'Nueva' }), 'storage_unavailable'); assert.equal(s.getState(), before);
+});
+
+for (const email of ['nueva@example.cl', '  NUEVA@EXAMPLE.CL  ']) test(`aceptación exige correo normalizado: ${email}`, () => {
+  const f = ready();
+  const next = success(f.store.actions.acceptInvitation(f.invitation.code, { name: 'Persona', email }));
+  assert.equal(next.users.at(-1)!.email, 'nueva@example.cl');
+});
+for (const email of ['otra@example.cl', '', 'inválido', undefined]) test(`correo rechazado sin consumo: ${email}`, () => {
+  const f = ready();
+  const attempt = () => f.store.actions.acceptInvitation(f.invitation.code, { name: 'Persona', email: email as string });
+  unchanged(f, attempt, email === 'otra@example.cl' ? 'email_mismatch' : 'invalid_input');
+  const result = attempt(); assert.ok(!result.ok);
+  assert.ok(!result.reason.includes(f.invitation.email));
+  assert.equal(f.storage.writes.filter(k => k === key).length, 2); // Crear y cerrar sesión.
+});
+for (const status of ['pendiente', 'vencida', 'revocada', 'usada'] as const) test(`renovación desde ${status}, una escritura y código anterior inutilizable`, () => {
+  const f = fixture(), old = success(f.store.actions.createInvitation(input)).invitations[0];
+  if (status === 'vencida') f.setNow(Date.parse(old.expiresAt));
+  if (status === 'revocada') {
+    const writes = f.storage.writes.filter(k => k === key).length;
+    success(f.store.actions.revokeInvitation(old.id));
+    assert.equal(f.storage.writes.filter(k => k === key).length, writes + 1);
+  }
+  if (status === 'usada') {
+    success(f.store.actions.logout());
+    success(f.store.actions.acceptInvitation(old.code, { name: 'Persona', email: input.email }));
+    success(f.store.actions.login());
+    unchanged(f, () => f.store.actions.renewInvitation(old.id, 1), 'used'); return;
+  }
+  const writes = f.storage.writes.filter(k => k === key).length;
+  const next = success(f.store.actions.renewInvitation(old.id, 1));
+  assert.equal(f.storage.writes.filter(k => k === key).length, writes + 1);
+  const renewed = next.invitations.at(-1)!;
+  assert.notEqual(renewed.code, old.code);
+  assert.equal(renewed.role, old.role); assert.deepEqual(renewed.companyIds, old.companyIds);
+  assert.equal(Date.parse(renewed.expiresAt) - Date.parse(renewed.createdAt), 86400000);
+  assert.equal(invitationStatus(next.invitations[0]), 'revocada');
+  success(f.store.actions.logout());
+  unchanged(f, () => f.store.actions.acceptInvitation(old.code, { name: 'Persona', email: input.email }), 'revoked');
+  success(f.store.actions.acceptInvitation(renewed.code, { name: 'Persona', email: input.email }));
+});
+for (const operation of ['crear', 'renovar', 'aceptar'] as const) test(`miembro suspendido con correo normalizado no cambia identidad ni plataforma al ${operation}`, () => {
+  const f = fixture(), old = success(f.store.actions.createInvitation(input)).invitations[0];
+  if (operation === 'aceptar') success(f.store.actions.logout());
+  const state = structuredClone(f.store.getState());
+  state.users.find(u => u.id === 'ana')!.email = ' NUEVA@EXAMPLE.CL ';
+  state.revision++; f.storage.setItem(key, JSON.stringify(state)); f.store.refresh();
+  f.platform.memberAccess.push({ organizationId: state.organization.id, userId: 'ana', status: 'suspended' });
+  const platform = structuredClone(f.platform), writes = f.storage.writes.length;
+  unchanged(f, () => operation === 'crear' ? f.store.actions.createInvitation(input)
+    : operation === 'renovar' ? f.store.actions.renewInvitation(old.id)
+      : f.store.actions.acceptInvitation(old.code, { name: 'Otra', email: input.email }), 'existing_member');
+  assert.deepEqual(f.platform, platform);
+  assert.ok(f.storage.writes.slice(writes).every(k => k === `${key}:lock`));
+});
+test('orden de validación: entorno antes de correo, coincidencia antes de miembro y nombre', () => {
+  const f = ready(), state = structuredClone(f.store.getState());
+  state.users[0].email = input.email; state.revision++;
+  f.storage.setItem(key, JSON.stringify(state)); f.store.refresh();
+  unchanged(f, () => f.store.actions.acceptInvitation(f.invitation.code, { name: '', email: 'otro@example.cl' }), 'email_mismatch');
+  unchanged(f, () => f.store.actions.acceptInvitation(f.invitation.code, { name: '', email: input.email }), 'existing_member');
+  f.platform.organizations = [];
+  unchanged(f, () => f.store.actions.acceptInvitation(f.invitation.code, { name: '', email: '' }), 'organization_unavailable');
 });

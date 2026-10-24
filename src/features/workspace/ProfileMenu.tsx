@@ -10,12 +10,12 @@ export function ProfileMenu({ onReset, onNavigate }: { onReset: () => void; onNa
   const user = selectUser(s);
   const navigate = useNavigate();
   return <div className="sidebar-bottom">
-    <DemoMode role={s.role} onChange={role => { onNavigate(); actions.setRole(role); navigate('/'); }} />{can(s.role, 'resetDemo') && <button className="reset" onClick={onReset}>
+    <DemoMode onChange={userId => { onNavigate(); actions.setActiveUser(userId); navigate('/'); }} />{can(s.role, 'resetDemo') && <button className="reset" onClick={onReset}>
       <RotateCcw size={13} />Restablecer datos de demostración</button>}<div className="user">
       <Avatar name={user.name} />
       <div>
         <strong>{user.name}</strong>
-        <small>{user.example ? 'Trabajador · datos de ejemplo' : s.role === 'client' ? 'Cliente' : 'Community manager'}</small>
+        <small>{{ community_manager: 'Community manager', worker: 'Trabajador', client: 'Cliente' }[user.role]}{user.example ? ' · datos de ejemplo' : ''}</small>
       </div>
       <button aria-label="Salir de la demostración" onClick={() => { onNavigate(); actions.logout(); }}>
         <LogOut size={17} />

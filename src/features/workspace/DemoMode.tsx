@@ -1,14 +1,15 @@
 import { useId } from 'react';
-import type { Role } from '../../types';
-export function DemoMode({ role, onChange }: { role: Role; onChange: (role: Role) => void }) {
-  const id = useId();
+import { actions, useStore } from '../../store';
+import { selectDemoGroups, selectUser } from '../../store/selectors';
+export function DemoMode({ onChange }: { onChange: (userId: string) => void }) {
+  const id = useId(), state = useStore();
   return <div className="demo-mode">
-    <label htmlFor={id}>Modo de demostración</label>
-    <select id={id} value={role} onChange={e => onChange(e.target.value as Role)}>
-      <option value="community_manager">Community manager</option>
-      <option value="worker">Trabajador</option>
-      <option value="client">Cliente</option>
+    <label htmlFor={id}>Probar como {selectUser(state).name}</label>
+    <select id={id} value={state.activeUserId} aria-describedby={id + '-help'} onChange={e => onChange(e.target.value)}>
+      {selectDemoGroups(state, actions.memberSuspended).map(group => <optgroup key={group.role} label={group.label}>
+        {group.people.map(person => <option key={person.id} value={person.id}>{person.label}</option>)}
+      </optgroup>)}
     </select>
-    <p>Demostración local. El selector cambia el usuario simulado y sus permisos; cada usuario tiene su propio acceso individual. Los permisos y la visibilidad reales se comprobarán en el servidor.</p>
+    <p id={id + '-help'}>Esta demostración funciona solo en este navegador y origen: no se envía ningún correo ni hay conexión entre dispositivos. Los permisos y la visibilidad reales se comprobarán en el servidor.</p>
   </div>;
 }

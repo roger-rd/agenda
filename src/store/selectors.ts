@@ -59,3 +59,15 @@ export const isResponsibleAuthorized = (s: State, companyId: string, responsible
 export const selectPostsWithUnauthorizedResponsible = (s: State, companyId: string) =>
   selectPosts(s, companyId).filter(p => !isResponsibleAuthorized(s, companyId, p.responsibleId))
     .map(post => ({ post, previousResponsible: s.users.find(u => u.id === post.responsibleId) }));
+
+export const responsibleLabel = (s: State, companyId: string, userId: string) =>
+  `${s.users.find(u => u.id === userId)?.name ?? 'Persona no disponible'}${isResponsibleAuthorized(s, companyId, userId) ? '' : ' (sin acceso)'}`;
+
+export function selectDemoGroups(s: State, memberSuspended: (id: string) => boolean) {
+  return (['community_manager', 'worker', 'client'] as const).map(role => ({
+    role, label: { community_manager: 'Community manager', worker: 'Trabajadores', client: 'Clientes' }[role],
+    people: s.users.filter(u => u.role === role).sort((a, b) => a.name.localeCompare(b.name, 'es')).map(u => ({
+      id: u.id, label: `${u.name}${u.id === s.activeUserId ? ' (persona actual)' : ''}${u.example ? ' (datos de ejemplo)' : ''}${memberSuspended(u.id) ? ' (acceso suspendido)' : ''}`,
+    })),
+  }));
+}

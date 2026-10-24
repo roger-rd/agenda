@@ -71,6 +71,6 @@ export function serializeState(s: State): string {
   })) });
 }
 
-export type WorkspaceError = 'conflict' | 'storage_unavailable' | 'forbidden' | 'invalid_input' |
+export type WorkspaceError = 'email_mismatch' | 'conflict' | 'storage_unavailable' | 'forbidden' | 'invalid_input' |
   'not_found' | 'used' | 'revoked' | 'expired' | 'organization_unavailable' |
   'invalid_companies' | 'session_active' | 'existing_member' | 'duplicate_email';
