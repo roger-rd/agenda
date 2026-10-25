@@ -1,5 +1,5 @@
 import { enterPlatformAdmin } from '../../auth/sessions';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { CalendarDays, ArrowRight } from 'lucide-react';
 import { actions } from '../../store';
 import { APP_NAME } from '../../lib/config';
@@ -38,6 +38,7 @@ export function Login() {
         <label>Contraseña
           <input type="password" autoComplete="off" placeholder="Escribe una contraseña" />
         </label>
+        <Link className="recovery-link" to="/recuperar">¿Olvidaste tu contraseña?</Link>
         <Button className="primary">Entrar a la demostración <ArrowRight size={17} /></Button>
         <Button type="button" className="admin-entry" aria-describedby="admin-entry-note"
           onClick={() => { enterPlatformAdmin(); navigate('/plataforma'); }}>

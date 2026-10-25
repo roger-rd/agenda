@@ -1288,3 +1288,29 @@ main[tabindex="-1"]:focus, main[tabindex="-1"]:focus-visible { outline: none; }
   .settings-page .button, .settings-dialog input { min-height: 44px; }
   .settings-dialog .modal-actions { flex-wrap: wrap; }
 }
+
+/* Perfil: identidad enlazada y contenido largo dentro de las pistas existentes. */
+.user .profile-link { display: flex; align-items: center; gap: 9px; min-width: 0; flex: 1; min-height: var(--tap); color: inherit; text-decoration: none; border-radius: 6px; }
+.profile-link > div { min-width: 0; }
+.profile-link .avatar { flex-shrink: 0; }
+.profile-link strong, .demo-mode label { overflow-wrap: anywhere; }
+.profile-link[aria-current="page"] { background: var(--color-violet-50, #f5f3ff); outline: 1px solid var(--color-violet-600, #5753c9); }
+.profile-link:focus-visible { outline: 2px solid var(--color-violet-600, #5753c9); outline-offset: 3px; }
+.profile-card { min-width: 0; padding: 20px; border: 1px solid var(--border, #e5e7eb); border-radius: 12px; background: var(--surface, #fff); }
+.profile-card :is(strong, dd, p, li), .profile-dialog p { overflow-wrap: anywhere; min-width: 0; }
+.profile-card dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-block: 24px; }
+.profile-card dl > div { min-width: 0; }
+.profile-card dd { margin: 6px 0 0; }
+.profile-card ul { padding: 0; margin: 0; list-style: none; }
+.profile-card > p { margin-block: 20px; }
+@media (max-width: 1023px) {
+  .profile-link, .user > button { min-width: 44px; min-height: 44px; }
+}
+@media (max-width: 639px) {
+  .profile-card dl { grid-template-columns: minmax(0, 1fr); }
+}
+
+.recovery-link { display: inline-flex; align-items: center; min-height: var(--tap, 44px); padding-block: 8px; overflow-wrap: anywhere; }
+.recovery-page .invitation-card { border-color: var(--border); }
+.recovery-page form > p { margin: 0; }
+.recovery-page .button { white-space: normal; }

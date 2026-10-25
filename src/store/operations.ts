@@ -5,7 +5,7 @@ import { changePostStatus, transitionPost, statuses } from './transitions';
 import { metadata, validateDraft, type PostInput } from '../features/posts/validation';
 import { zonedFormat } from '../lib/dates';
 
-export type Result = { ok: true; state: State } | { ok: false; reason: string; code?: WorkspaceError; field?: 'name' | 'color' };
+export type Result = { ok: true; state: State } | { ok: false; reason: string; code?: WorkspaceError; field?: 'name' | 'color' | 'email' };
 const reject = (reason: string): Result => ({ ok: false, reason });
 function authorized(s: State, action: Action, companyId: string) {
   return s.authenticated && can(s.role, action) && !!selectCompany(s, companyId);

@@ -37,7 +37,7 @@ export function fieldErrors(s: State, d: SettingsDraft) {
   const color = changed.color ? validateColor(d.values.color) : undefined;
   if (name && !name.ok) errors.name = name.reason;
   if (color && !color.ok) errors.color = color.reason;
-  if (d.failure?.field && !isRetry(d)) errors[d.failure.field] = d.failure.reason;
+  if ((d.failure?.field === 'name' || d.failure?.field === 'color') && !isRetry(d)) errors[d.failure.field] = d.failure.reason;
   return errors;
 }
 export function submitState(s: State, d: SettingsDraft) {

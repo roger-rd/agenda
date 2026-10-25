@@ -106,3 +106,15 @@ test('adaptador de directorio expone exclusivamente los tres metadatos permitido
   assert.deepEqual(Object.keys(directory).sort(), ['companies', 'organization', 'users']);
   assert.equal(directory.organization, getState().organization);
 });
+
+test('recuperación pública: tres rutas y sesiones, barra final y query/hash', () => {
+  for (const path of ['/recuperar', '/recuperar/enviado', '/recuperar/restablecer']) {
+    for (const slash of ['', '/']) for (const suffix of ['', '?dato=1', '#seccion', '?dato=1#seccion']) {
+      assert.deepEqual(resolveRoute('none', path + slash + suffix), { view: 'recovery' });
+      assert.deepEqual(resolveRoute('workspace', path + slash + suffix), { view: 'workspace', redirectTo: '/' });
+      assert.deepEqual(resolveRoute('platform_admin', path + slash + suffix), { view: 'platform', redirectTo: '/plataforma' });
+      for (const session of ['none', 'workspace', 'platform_admin'] as const)
+        assert.deepEqual(resolveRoute(session, path.toUpperCase() + slash + suffix), resolveRoute(session, '/desconocida'));
+    }
+  }
+});

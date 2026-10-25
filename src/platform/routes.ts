@@ -17,3 +17,16 @@ export function organizationDetailId(pathname: string) {
 export const INVITATION_PATTERN = /^\/invitacion\/([A-Za-z0-9_-]{1,128})\/?$/;
 export const invitationCode = (pathname: string) => INVITATION_PATTERN.exec(pathname.split(/[?#]/, 1)[0])?.[1] ?? '';
 export const isInvitationRoute = (path: string) => path === '/invitacion' || path.startsWith('/invitacion/');
+
+export const RECOVERY_ROUTES = {
+  request: '/recuperar',
+  sent: '/recuperar/enviado',
+  reset: '/recuperar/restablecer',
+} as const;
+export function recoveryScreen(pathname: string) {
+  const path = pathname.split(/[?#]/, 1)[0].replace(/\/$/, '');
+  if (path === RECOVERY_ROUTES.request) return 'request';
+  if (path === RECOVERY_ROUTES.sent) return 'sent';
+  if (path === RECOVERY_ROUTES.reset) return 'reset';
+  return null;
+}

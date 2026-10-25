@@ -8,7 +8,7 @@ import { resolveWorkspaceGate } from './features/access/workspaceGate';
 import { AccessSuspended } from './features/access/AccessSuspended';
 import { useActiveSession } from './auth/useActiveSession';
 import { resolveRoute } from './auth/routeGuard';
-import { isOrganizationsRoute, organizationDetailId } from './platform/routes';
+import { recoveryScreen, isOrganizationsRoute, organizationDetailId } from './platform/routes';
 import { initialRecovery, updateRecovery } from './features/access/recovery';
 import { APP_NAME } from './lib/config';
 import { Login } from './features/auth/Login';
@@ -16,7 +16,20 @@ import { Workspace } from './features/workspace/Workspace';
 import { InvitationPage } from './features/invitation/InvitationPage';
 import { PlatformShell } from './features/platform/PlatformShell';
 
+import { RecoveryPage } from './features/recovery/RecoveryPage';
+
 export function App() {
+  const session = useActiveSession();
+  const location = useLocation();
+  const { view, redirectTo } = resolveRoute(session, location.pathname + location.search + location.hash);
+  if (recoveryScreen(location.pathname)) {
+    if (redirectTo) return <Navigate to={redirectTo} replace />;
+    if (view === 'recovery') return <RecoveryPage key={location.pathname} />;
+  }
+  return <SessionApp />;
+}
+
+function SessionApp() {
   const state = useStore();
   const session = useActiveSession();
   const location = useLocation();

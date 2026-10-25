@@ -1,3 +1,4 @@
+import { Profile } from '../profile/Profile';
 import { Settings } from '../settings/Settings';
 import { ACCESS_RESTORED } from '../access/accessMessages';
 import { useNavigationDrawer } from './useNavigationDrawer';
@@ -89,6 +90,7 @@ export function Workspace({ accessRestored = false, focusAfterBlock = false }: {
           <p>{ACCESS_RESTORED}</p><Button onClick={() => { setNoticeDismissed(true); main.current?.focus({ preventScroll: true }); }}>Entendido</Button>
         </div>}
         <Routes>
+          <Route path="/perfil" element={can(s.role, 'editOwnProfile') ? <Profile key={s.activeUserId} /> : <Navigate to={home} replace />} />
           <Route path="/ajustes" element={can(s.role, 'viewSettings') ? <Settings /> : <Navigate to={home} replace />} />
           <Route path="/equipo" element={can(s.role, 'viewTeam') ? <Team /> : <Navigate to={home} replace />} />
           <Route path="/sin-empresas" element={<div className="empty"><h1>Sin empresas asignadas</h1><p>Pide acceso al community manager.</p></div>} />

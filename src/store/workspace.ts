@@ -10,6 +10,7 @@ import { acquireLease } from './sync';
 import * as operations from './operations';
 import * as invitations from './invitations';
 import * as settings from './settings';
+import * as profile from './profile';
 import * as team from './teamAccess';
 import { ACCESS_DENIED } from './accessGuard';
 export const WORKSPACE_KEY = 'agenda-demo-v2';
@@ -114,6 +115,7 @@ export function createWorkspaceStore(storage: StorageLike | undefined, options: 
     },
     setCompany: (id: string) => guarded(s => !s.authenticated ? invitations.failure('forbidden', 'Debes iniciar sesión en el espacio de trabajo.')
       : selectCompanies(s).some(c => c.id === id) ? { ok: true, state: { ...s, activeCompanyId: id } } : invitations.failure('forbidden', 'Empresa no disponible.')),
+    updateProfile: (input: profile.ProfileUpdate) => guarded(s => profile.updateProfile(s, input, context())),
     updateOrganization: (input: settings.OrganizationUpdate) => guarded(s => settings.updateOrganization(s, input, context())),
     updateCompany: (input: settings.CompanyUpdate) => guarded(s => settings.updateCompany(s, input, context())),
     createCompany: (name: string, color: string) => guarded(s => settings.createCompany(s, name, color, context())),

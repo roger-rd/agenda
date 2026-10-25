@@ -19,7 +19,7 @@ export function InvitationPage() {
   const [errorCode, setErrorCode] = useState<WorkspaceError | null>(null);
   const [ready, setReady] = useState(true);
   const [, tick] = useState(0);
-  const [success, setSuccess] = useState<{ id: string; name: string; details: Extract<InvitationInspection, { status: 'valid' }> } | null>(null);
+  const [success, setSuccess] = useState<{ id: string; details: Extract<InvitationInspection, { status: 'valid' }> } | null>(null);
   const main = useRef<HTMLElement>(null), alert = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
     main.current?.focus({ preventScroll: true });
@@ -46,8 +46,7 @@ export function InvitationPage() {
       return;
     }
     const id = result.state.invitations.find(i => i.code === code)!.usedBy!;
-    const user = result.state.users.find(u => u.id === id)!;
-    setSuccess({ id, name: user.name, details: inspection });
+    setSuccess({ id, details: inspection });
     setErrorCode(null);
     setMessage('');
   }
@@ -57,14 +56,15 @@ export function InvitationPage() {
     if (result.ok) navigate('/');
     else { setMessage(acceptanceErrors[result.code ?? 'invalid_input'] ?? 'No se pudo entrar.'); actions.refresh(); }
   }
+  const acceptedName = state.users.find(u => u.id === success?.id)?.name ?? 'Persona no disponible';
   const submit = acceptanceSubmitState(errorCode, ready);
   const details = success?.details ?? (inspection.status === 'valid' ? inspection : null);
   return <main ref={main} tabIndex={-1} className="invitation-page" data-revision={state.revision}>
     <section className="platform-card invitation-card" aria-labelledby="invitation-heading">
-      <h1 id="invitation-heading">{success ? `Bienvenido/a, ${success.name}` : inspection.status === 'valid' ? 'Aceptar invitación' : invitationMessages[inspection.status]}</h1>
+      <h1 id="invitation-heading">{success ? `Bienvenido/a, ${acceptedName}` : inspection.status === 'valid' ? 'Aceptar invitación' : invitationMessages[inspection.status]}</h1>
       {message && <p ref={alert} tabIndex={-1} role="alert" aria-live="assertive">{message}</p>}
       {details && <dl className="invitation-summary"><div><dt>Organización</dt><dd><strong>{details.organization}</strong></dd></div><div><dt>Rol</dt><dd>{details.role === 'worker' ? 'Trabajador' : 'Cliente'}</dd></div><div><dt>Empresas</dt><dd>{details.companies.join(', ')}</dd></div></dl>}
-      {success ? <div role="status" aria-live="polite"><p>Tu acceso está preparado. Entra cuando quieras continuar.</p><Button className="primary" onClick={enter}>Entrar como {success.name}</Button></div>
+      {success ? <div role="status" aria-live="polite"><p>Tu acceso está preparado. Entra cuando quieras continuar.</p><Button className="primary" onClick={enter}>Entrar como {acceptedName}</Button></div>
         : inspection.status === 'valid' && (session !== 'none'
           ? <div><p>Para aceptar esta invitación primero cierra tu sesión actual</p><Button onClick={logoutAll}>Cerrar sesión y continuar</Button></div>
           : <form noValidate onSubmit={e => { e.preventDefault(); accept(); }}>
