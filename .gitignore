@@ -4,3 +4,10 @@ dist/
 test-results/
 
 .npm-cache/
+.env
+.env.*
+!.env.example
+backend/dist/
+backend/coverage/
+backend/storage/
+*.log

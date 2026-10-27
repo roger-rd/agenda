@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "module": "commonjs",
+    // TS 6 depreca node10; node16/nodenext requieren cambiar module.
+    // Se conserva CommonJS explícito mediante la compatibilidad de TS 6.
+    "moduleResolution": "node10",
+    "ignoreDeprecations": "6.0",
+    "target": "ES2022",
+    "outDir": "dist",
+    "rootDir": "src",
+    "sourceMap": true,
+    "skipLibCheck": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "types": ["node", "jest"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist", "node_modules"]
+}
