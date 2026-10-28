@@ -1,0 +1,73 @@
+# PostgreSQL 16 para desarrollo local de Agenda de Contenido.
+# /docker-entrypoint-initdb.d solo se ejecuta con el volumen vacío;
+# la inicialización no es idempotente sobre un volumen existente.
+# Arranque: docker compose -f backend/infra/docker-compose.dev.yml --env-file backend/infra/.env up -d
+name: agenda-dev
+
+services:
+  postgres:
+    image: postgres:16.15-bookworm
+    container_name: agenda-postgres16
+    restart: on-failure:3
+    ports: ["127.0.0.1:5433:5432"]
+    volumes:
+      - agenda_pg16_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    environment:
+      POSTGRES_USER: agenda_admin
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${AGENDA_ADMIN_PASSWORD:?define AGENDA_ADMIN_PASSWORD en backend/infra/.env}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --data-checksums"
+      AGENDA_DEV_OWNER_PASSWORD: ${AGENDA_DEV_OWNER_PASSWORD:?define AGENDA_DEV_OWNER_PASSWORD en backend/infra/.env}
+      AGENDA_DEV_APP_PASSWORD: ${AGENDA_DEV_APP_PASSWORD:?define AGENDA_DEV_APP_PASSWORD en backend/infra/.env}
+      AGENDA_TEST_OWNER_PASSWORD: ${AGENDA_TEST_OWNER_PASSWORD:?define AGENDA_TEST_OWNER_PASSWORD en backend/infra/.env}
+      AGENDA_TEST_APP_PASSWORD: ${AGENDA_TEST_APP_PASSWORD:?define AGENDA_TEST_APP_PASSWORD en backend/infra/.env}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - max_connections=50
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - effective_cache_size=384MB
+      - -c
+      - max_wal_size=512MB
+      - -c
+      - min_wal_size=80MB
+      - -c
+      - timezone=UTC
+      - -c
+      - log_timezone=UTC
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - log_statement=none
+      - -c
+      - log_connections=off
+      - -c
+      - log_disconnections=off
+    mem_limit: 768m
+    memswap_limit: 768m
+    shm_size: 128mb
+    cpus: 1.5
+    pids_limit: 200
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agenda_admin -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  agenda_pg16_data:
+    name: agenda_pg16_data
