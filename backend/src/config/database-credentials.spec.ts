@@ -20,3 +20,27 @@ it('protege las credenciales en serialización, inspección y copias', () => {
   expect(Object.isFrozen(config)).toBe(true);
   expect(Object.isFrozen(credentials)).toBe(true);
 });
+
+import { activeSecretCount, resetSecretsForTests, scrubText } from '../logging/secret-registry';
+import { sanitizeLogObject } from '../logging/error-sanitizer';
+afterEach(resetSecretsForTests);
+it('registra y libera referencias sin impedir revelar la contraseña', () => {
+  const password = 'fake-password-for-unit-tests-0001';
+  const before = activeSecretCount();
+  const a = new DatabaseCredentials('agenda_test_app', password);
+  const b = new DatabaseCredentials('agenda_test_app', password);
+  expect(activeSecretCount()).toBe(before + 1);
+  a.dispose(); a.dispose();
+  expect(scrubText(password)).toBe('[REDACTED]');
+  b.dispose(); b.dispose();
+  expect(activeSecretCount()).toBe(before);
+  expect(scrubText(password)).toBe(password);
+  expect(a.revealPassword()).toBe(password);
+  for (const text of [String(a), JSON.stringify(a), inspect(a)]) expect(text).not.toContain(password);
+});
+it('el registro cerrado usa las formas enmascaradas', () => {
+  const c = new DatabaseCredentials('agenda_test_app', 'fake-password-for-unit-tests-0001');
+  const config = new DatabaseConnectionConfig('localhost', 5433, 'agenda_test', c, 5);
+  expect(sanitizeLogObject({ c, config })).toMatchObject({ c: c.toJSON(), config: config.toJSON() });
+  c.dispose();
+});

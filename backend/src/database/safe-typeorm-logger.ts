@@ -1,3 +1,4 @@
+import { scrubText } from '../logging/secret-registry';
 import type { Logger } from 'typeorm';
 
 interface LogSink {
@@ -39,6 +40,6 @@ export class SafeTypeOrmLogger implements Logger {
   logMigration(message: unknown): void { this.debug(message); }
   log(_level: unknown, message: unknown): void { void _level; this.debug(message); }
   private debug(message: unknown): void {
-    this.sink.debug({ context: 'TypeORM', ...(typeof message === 'string' ? { message: message.slice(0, 200) } : { type: typeof message }) }, 'Evento interno de TypeORM.');
+    this.sink.debug({ context: 'TypeORM', ...(typeof message === 'string' ? { message: scrubText(message, 200) } : { type: typeof message }) }, 'Evento interno de TypeORM.');
   }
 }

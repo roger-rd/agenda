@@ -30,8 +30,18 @@ it('solo registra duración y verbo en consultas lentas e ignora consultas norma
 it.each(['log', 'schema', 'migration'])('debug %s trunca strings y solo describe tipos', method => {
   const emit = (value: unknown) => method === 'log' ? logger.log('warn', value) : method === 'schema' ? logger.logSchemaBuild(value) : logger.logMigration(value);
   emit('x'.repeat(200) + canary);
-  expect(sink.debug.mock.calls[0][0]).toEqual({ context: 'TypeORM', message: 'x'.repeat(200) });
+  expect(sink.debug.mock.calls[0][0]).toEqual({ context: 'TypeORM', message: 'x'.repeat(200) + '…' });
   for (const value of [{ secret: canary }, null, undefined, 42]) emit(value);
   expect(sink.debug.mock.calls.slice(1).map(call => call[0])).toEqual(['object', 'object', 'undefined', 'number'].map(type => ({ context: 'TypeORM', type })));
   expect(JSON.stringify(sink.debug.mock.calls)).not.toContain(canary);
+});
+
+import { registerSecret, resetSecretsForTests } from '../logging/secret-registry';
+it('depura secretos y patrones antes del truncado', () => {
+  const password = 'fake-password-for-unit-tests-0001';
+  const release = registerSecret(password);
+  try {
+    logger.logMigration(`${password} token=CANARIO_TOKEN`);
+    expect(sink.debug.mock.calls[0][0].message).toBe('[REDACTED] token=[REDACTED]');
+  } finally { release(); resetSecretsForTests(); }
 });

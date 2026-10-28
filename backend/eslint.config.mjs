@@ -4,6 +4,7 @@ import globals from 'globals';
 
 export default ts.config(
   { ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'jest.config.js'] },
+  { files: ['src/**/*.ts'], ignores: ['**/*.spec.ts'], rules: { 'no-console': 'error' } },
   js.configs.recommended,
   ...ts.configs.recommended,
   {

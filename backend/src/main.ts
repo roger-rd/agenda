@@ -4,9 +4,11 @@ import { PinoLogger } from 'nestjs-pino';
 import { AppConfigService } from './config/app-config.service';
 import { startupErrorMessage } from './startup-error';
 import { setupHttpLogging } from './logging/setup-http-logging';
+import { createBootstrapLogger } from './logging/safe-logging';
 import { installFatalHandlers } from './logging/fatal-handlers';
 
 async function bootstrap(): Promise<void> {
+  const removeBootstrapHandlers = installFatalHandlers(createBootstrapLogger());
   // La importación diferida permite capturar también errores de ConfigModule.forRoot.
   const { AppModule } = await import('./app.module');
   const app = await NestFactory.create(AppModule, { bufferLogs: true, autoFlushLogs: false, abortOnError: false });
@@ -15,6 +17,7 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
   const config = app.get(AppConfigService);
   const logger = await app.resolve(PinoLogger);
+  removeBootstrapHandlers();
   installFatalHandlers(logger);
   await app.listen(config.port, config.host);
   logger.info({ host: config.host, port: config.port, env: config.env, logLevel: config.logLevel }, 'Servidor escuchando.');

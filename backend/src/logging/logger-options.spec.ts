@@ -1,9 +1,12 @@
 import { DatabaseConnectionConfig, DatabaseCredentials } from '../config/database-credentials';
 import 'reflect-metadata';
+import { IncomingMessage, createServer } from 'node:http';
+import request from 'supertest';
+import { Socket } from 'node:net';
 import { Writable } from 'node:stream';
 import { EventEmitter } from 'node:events';
 import { pino } from 'pino';
-import { createLoggerOptions, requestId, sanitizeUrl } from './logger-options';
+import { createLoggerOptions, requestId, sanitizeUrl, serializeRequest } from './logger-options';
 import { installFatalHandlers } from './fatal-handlers';
 import { isUuidV7, Uuid7Generator } from '../common/ids/uuid7-generator';
 
@@ -55,9 +58,110 @@ describe('Logging', () => {
     const logger = { fatal: jest.fn() };
     const remove = installFatalHandlers(logger, emitter);
     emitter.emit(event, { secret: 'no-divulgar' });
-    expect(logger.fatal).toHaveBeenCalledWith({ event }, 'Fallo fatal del proceso.');
+    expect(logger.fatal).toHaveBeenCalledWith({ event, err: { secret: 'no-divulgar' } }, 'Fallo fatal del proceso.');
     expect(emitter.exit).toHaveBeenCalledWith(1);
     remove();
     expect(emitter.listenerCount(event)).toBe(0);
   });
+});
+
+describe('remoteAddress mediante getter nativo', () => {
+  it('omite la dirección de un socket real sin conexión sin lanzar', () => {
+    const req = new IncomingMessage(new Socket());
+    req.method = 'GET'; req.url = '/safe';
+    expect(() => serializeRequest(req)).not.toThrow();
+    expect(serializeRequest(req)).toEqual({ method: 'GET', url: '/safe' });
+  });
+  it('omite direcciones de objetos falsos, incluso bajo una petición real', () => {
+    expect(serializeRequest({ socket: { remoteAddress: 'CANARIO_IP' } })).toEqual({});
+    const req = new IncomingMessage(new Socket());
+    Object.defineProperty(req, 'socket', { value: { remoteAddress: 'CANARIO_IP' } });
+    expect(serializeRequest(req)).not.toHaveProperty('remoteAddress');
+    expect(JSON.stringify(serializeRequest(req))).not.toContain('CANARIO_IP');
+  });
+  class CustomSocket extends Socket {}
+  it.each([Socket, CustomSocket])('no invoca el accesor propio hostil de %p', Ctor => {
+    const socket = new Ctor();
+    const get = jest.fn(() => { throw new Error('CANARIO_IP'); });
+    Object.defineProperty(socket, 'remoteAddress', { get });
+    const req = new IncomingMessage(socket);
+    expect(serializeRequest(req)).not.toHaveProperty('remoteAddress');
+    expect(get).not.toHaveBeenCalled();
+  });
+  it('rechaza proxies de petición, socket y prototipo sin ejecutar trampas', () => {
+    const trap = jest.fn(() => { throw new Error('CANARIO_PROXY'); });
+    const handler = { get: trap, getPrototypeOf: trap, getOwnPropertyDescriptor: trap };
+    const req = new IncomingMessage(new Socket());
+    expect(serializeRequest(new Proxy(req, handler))).toEqual({});
+    Object.defineProperty(req, 'socket', { value: new Proxy(new Socket(), handler), configurable: true });
+    expect(serializeRequest(req)).not.toHaveProperty('remoteAddress');
+    Object.defineProperty(req, 'socket', { value: Object.create(new Proxy(Socket.prototype, handler)) });
+    expect(serializeRequest(req)).not.toHaveProperty('remoteAddress');
+    expect(trap).not.toHaveBeenCalled();
+  });
+});
+
+describe('internos de socket hostiles con pino real', () => {
+  type Mutate = (socket: Socket, req: IncomingMessage, hostile: () => string) => void;
+  const cases: [string, Mutate][] = [
+    ['socket genuino sin conexión', () => {}],
+    ['socket falso', (_socket, req) => { Object.defineProperty(req, 'socket', { value: { remoteAddress: 'CANARIO_IP' } }); }],
+    ['_getpeername propio', (socket, _req, h) => { Object.defineProperty(socket, '_getpeername', { value: h }); }],
+    ['subclase con _getpeername', (socket, _req, h) => {
+      class Child extends Socket { _getpeername() { return h(); } }
+      Object.setPrototypeOf(socket, Child.prototype);
+    }],
+    ['_handle accesor', (socket, _req, h) => { Object.defineProperty(socket, '_handle', { get: h }); }],
+    ['_handle con getter original y setter distinto', (socket, _req, h) => {
+      const descriptor = Object.getOwnPropertyDescriptor(Socket.prototype, '_handle');
+      Object.defineProperty(socket, '_handle', { get: descriptor?.get, set: h });
+    }],
+    ['getpeername JS', (socket, _req, h) => { Object.defineProperty(socket, '_handle', { value: { getpeername: h } }); }],
+    ['getpeername accesor', (socket, _req, h) => {
+      Object.defineProperty(socket, '_handle', { value: Object.defineProperty({}, 'getpeername', { get: h }) });
+    }],
+    ['_peername accesor', (socket, _req, h) => { Object.defineProperty(socket, '_peername', { get: h }); }],
+    ['connecting accesor', (socket, _req, h) => { Object.defineProperty(socket, 'connecting', { get: h }); }],
+  ];
+  it.each(cases)('%s no ejecuta código ni filtra datos', (_label, mutate) => {
+    const hostile = jest.fn(() => 'CANARIO_IP');
+    const socket = new Socket();
+    const req = new IncomingMessage(socket);
+    req.method = 'GET'; req.url = '/safe';
+    mutate(socket, req, hostile);
+    let output = '';
+    const stream = new Writable({ write(chunk, _encoding, done) { output += String(chunk); done(); } });
+    const logger = pino(createLoggerOptions({ logLevel: 'info' }, stream), stream);
+    expect(() => logger.info({ req }, 'Seguro.')).not.toThrow();
+    expect(hostile).not.toHaveBeenCalled();
+    expect(output).not.toContain('CANARIO_');
+    const lines = output.trim().split('\n');
+    expect(lines).toHaveLength(1);
+    const entry: unknown = JSON.parse(lines[0]);
+    expect(entry).toHaveProperty('req.method', 'GET');
+    expect(entry).not.toHaveProperty('req.remoteAddress');
+  });
+});
+
+it('serializeRequest conserva remoteAddress en una petición a un servidor HTTP real', async () => {
+  let serialized: object | undefined;
+  const server = createServer((req, res) => {
+    Object.assign(req, { id: 'http-real-request' });
+    serialized = serializeRequest(req);
+    res.end('ok');
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => {
+        server.removeListener('error', reject);
+        resolve();
+      });
+    });
+    await request(server).get('/safe?token=CANARIO_QUERY').expect(200);
+    expect(serialized).toEqual({ id: 'http-real-request', method: 'GET', url: '/safe', remoteAddress: expect.any(String) });
+    expect(Object.keys(serialized ?? {}).sort()).toEqual(['id', 'method', 'remoteAddress', 'url']);
+  } finally {
+    if (server.listening) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
 });

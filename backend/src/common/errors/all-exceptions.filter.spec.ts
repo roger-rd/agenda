@@ -36,7 +36,7 @@ class ErrorsController {
   }
 }
 
-type Log = { level: number; req?: { id: string; url: string }; err?: { stack?: string }; requestId?: string; status?: number };
+type Log = { level: number; req?: { id: string; url: string }; err?: { stack?: string; message?: string }; requestId?: string; status?: number };
 const originalEnv = { ...process.env };
 beforeAll(() => {
   process.env = { NODE_ENV: 'test', DATABASE_NAME: 'agenda_test', DATABASE_USER: 'agenda_test_app',
@@ -107,7 +107,9 @@ describe('Filtro HTTP y logs', () => {
     const response = await request(app.getHttpServer()).get('/crash').set('X-Request-Id', 'test-request-123').expect(500);
     const entries = logs();
     expect(entries.filter(log => log.err)).toHaveLength(1);
-    expect(entries.find(log => log.err)?.err?.stack).toContain('Error: fallo db');
+    expect(entries.find(log => log.err)?.err?.message).toContain('fallo db');
+    expect(entries.find(log => log.err)?.err?.stack).toContain('at ');
+    expect(entries.find(log => log.err)?.err?.stack).not.toContain('Error: fallo db');
     expect(entries.find(log => log.err)?.level).toBe(50);
     expect(entries).toHaveLength(2);
     expect(entries[1]).not.toHaveProperty('err');
