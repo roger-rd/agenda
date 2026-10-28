@@ -6,7 +6,7 @@ import request from 'supertest';
 import { Writable } from 'node:stream';
 import { LoggerModule, PinoLogger } from 'nestjs-pino';
 import { APP_FILTER } from '@nestjs/core';
-import { AppConfigModule } from '../../config/app-config.module';
+
 import { IdsModule } from '../ids/ids.module';
 import { isUuidV7, Uuid7Generator } from '../ids/uuid7-generator';
 import { createLoggerOptions } from '../../logging/logger-options';
@@ -37,11 +37,19 @@ class ErrorsController {
 }
 
 type Log = { level: number; req?: { id: string; url: string }; err?: { stack?: string }; requestId?: string; status?: number };
+const originalEnv = { ...process.env };
+beforeAll(() => {
+  process.env = { NODE_ENV: 'test', DATABASE_NAME: 'agenda_test', DATABASE_USER: 'agenda_test_app',
+    DATABASE_PASSWORD: 'fake-password-for-unit-tests-0001' };
+});
+afterAll(() => { process.env = originalEnv; });
+
 describe('Filtro HTTP y logs', () => {
   let app: INestApplication;
   let output: string;
   const logs = (): Log[] => output.trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Log);
   beforeAll(async () => {
+    const { AppConfigModule } = await import('../../config/app-config.module');
     const stream = new Writable({ write(chunk, _encoding, done) { output += String(chunk); done(); } });
     const module = await Test.createTestingModule({
       imports: [AppConfigModule, IdsModule, LoggerModule.forRoot({ pinoHttp: createLoggerOptions({ logLevel: 'info' }, stream), useExisting: true })],

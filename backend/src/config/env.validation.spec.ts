@@ -1,11 +1,18 @@
 import 'reflect-metadata';
 import { ConfigService } from '@nestjs/config';
 import { AppConfigService } from './app-config.service';
-import { environments, logLevels, validateEnvironment } from './env.validation';
+import { environments, logLevels, validateEnvironment as validate } from './env.validation';
+
+function validateEnvironment(input: Record<string, unknown>) {
+  const env = input.NODE_ENV ?? 'development';
+  const suffix = env === 'production' ? 'live' : env === 'test' ? 'test' : 'dev';
+  return validate({ DATABASE_NAME: `agenda_${suffix}`, DATABASE_USER: `agenda_${suffix}_app`,
+    DATABASE_PASSWORD: 'fake-password-for-unit-tests-0001', ...input });
+}
 
 describe('Configuración', () => {
   it('aplica valores por defecto e ignora claves desconocidas', () => {
-    expect(validateEnvironment({ unknown: 'secreto' })).toEqual({ NODE_ENV: 'development', HOST: '127.0.0.1', PORT: 3000, LOG_LEVEL: 'info' });
+    expect(validateEnvironment({ unknown: 'secreto' })).toMatchObject({ NODE_ENV: 'development', HOST: '127.0.0.1', PORT: 3000, LOG_LEVEL: 'info' });
   });
   it.each(environments)('acepta entorno %s y selecciona nivel', NODE_ENV => {
     expect(validateEnvironment({ NODE_ENV }).LOG_LEVEL).toBe(NODE_ENV === 'test' ? 'silent' : 'info');
@@ -33,5 +40,24 @@ describe('Configuración', () => {
     expect(service.logLevel).toBe('info');
     expect(service.isProduction).toBe(true);
     expect(service.isTest).toBe(false);
+    expect(service.database.credentials.toJSON().password).toBe('[REDACTED]');
+    expect(Object.values(service).join()).not.toContain('fake-password');
+  });
+});
+
+describe('Integración de BD', () => {
+  it('rechaza credenciales de migración y agrega errores escalares y de BD', () => {
+    let message = '';
+    try { validate({ NODE_ENV: 'CANARIO_SECRETO_123', PORT: 'CANARIO_SECRETO_123',
+      DATABASE_PASSWORD: 'CANARIO_SECRETO_123 ', DATABASE_MIGRATION_USER: 'CANARIO_SECRETO_123',
+      DATABASE_MIGRATION_PASSWORD: 'CANARIO_SECRETO_123' }); }
+    catch (error) { message = (error as Error).message; }
+    for (const key of ['NODE_ENV', 'PORT', 'DATABASE_NAME', 'DATABASE_USER', 'DATABASE_PASSWORD',
+      'DATABASE_MIGRATION_USER', 'DATABASE_MIGRATION_PASSWORD']) expect(message).toContain(key);
+    expect(message).not.toContain('CANARIO_SECRETO_123');
+  });
+  it('solo devuelve las cuatro variables escalares y DATABASE', () => {
+    expect(Object.keys(validateEnvironment({ NODE_ENV: 'test' })).sort())
+      .toEqual(['DATABASE', 'HOST', 'LOG_LEVEL', 'NODE_ENV', 'PORT']);
   });
 });

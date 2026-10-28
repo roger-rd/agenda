@@ -1,10 +1,12 @@
+import type { DatabaseConnectionConfig } from './database-credentials';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { EnvironmentVariables } from './env.validation';
+import { ValidatedEnvironment } from './env.validation';
 
 @Injectable()
 export class AppConfigService {
-  constructor(private readonly config: ConfigService<EnvironmentVariables, true>) {}
+  constructor(private readonly config: ConfigService<ValidatedEnvironment, true>) {}
+  get database(): DatabaseConnectionConfig { return this.config.get('DATABASE', { infer: true }); }
   get env() { return this.config.get('NODE_ENV', { infer: true }); }
   get host() { return this.config.get('HOST', { infer: true }); }
   get port() { return this.config.get('PORT', { infer: true }); }

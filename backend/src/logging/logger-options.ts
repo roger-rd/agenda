@@ -23,7 +23,7 @@ export function createLoggerOptions(
   stream?: Writable,
   ids: IdGenerator = new Uuid7Generator(),
 ): Options {
-  const sensitive = ['password', 'passwordHash', 'token', 'accessToken', 'refreshToken', 'secret', 'apiKey', 'cookie'];
+  const sensitive = ['password', 'passwordHash', 'token', 'accessToken', 'refreshToken', 'secret', 'apiKey', 'cookie', 'DATABASE_PASSWORD', 'DATABASE_MIGRATION_PASSWORD', 'databasePassword', 'connectionString', 'credentials'];
   return {
     level: config.logLevel,
     ...(stream ? { stream } : {}),

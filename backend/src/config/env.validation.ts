@@ -1,6 +1,8 @@
 import { plainToInstance } from 'class-transformer';
 import { IsIn, IsInt, Max, Min, ValidateBy, validateSync } from 'class-validator';
-import { isIP } from 'node:net';
+import { EnvironmentValidationError, hostValidator } from './validation-rules';
+import { validateDatabaseEnvironment } from './database-environment';
+import type { DatabaseConnectionConfig } from './database-credentials';
 
 export const environments = ['development', 'test', 'production'] as const;
 export const logLevels = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
@@ -12,12 +14,7 @@ export class EnvironmentVariables {
   @IsIn(environments, { message: 'debe ser development, test o production' })
   NODE_ENV!: Environment;
 
-  @ValidateBy({ name: 'host', validator: {
-    validate: (value: unknown) => typeof value === 'string' && value.length <= 253 &&
-      (isIP(value) !== 0 || (!/^[\d.]+$/.test(value) && value.split('.').every(
-        label => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(label)))),
-    defaultMessage: () => 'debe ser un hostname o IP válido, sin espacios',
-  } })
+  @ValidateBy({ name: 'host', validator: hostValidator })
   HOST!: string;
 
   @IsInt({ message: portRule })
@@ -29,9 +26,11 @@ export class EnvironmentVariables {
   LOG_LEVEL!: LogLevel;
 }
 
-export class EnvironmentValidationError extends Error {}
+export { EnvironmentValidationError } from './validation-rules';
 
-export function validateEnvironment(input: Record<string, unknown>): EnvironmentVariables {
+export type ValidatedEnvironment = EnvironmentVariables & { DATABASE: DatabaseConnectionConfig };
+
+export function validateEnvironment(input: Record<string, unknown>): ValidatedEnvironment {
   const env = input.NODE_ENV === undefined ? 'development' : input.NODE_ENV;
   const port = input.PORT === undefined ? 3000 : input.PORT;
   const result = plainToInstance(EnvironmentVariables, {
@@ -41,10 +40,18 @@ export function validateEnvironment(input: Record<string, unknown>): Environment
     LOG_LEVEL: input.LOG_LEVEL === undefined ? (env === 'test' ? 'silent' : 'info') : input.LOG_LEVEL,
   });
   const errors = validateSync(result, { skipMissingProperties: false });
-  if (errors.length) {
-    throw new EnvironmentValidationError(errors.map(error =>
-      `${error.property}: ${[...new Set(Object.values(error.constraints ?? {}))].join('; ')}`,
-    ).join('\n'));
+  const messages = errors.map(error =>
+    `${error.property}: ${[...new Set(Object.values(error.constraints ?? {}))].join('; ')}`,
+  );
+  let database: DatabaseConnectionConfig | undefined;
+  try {
+    database = validateDatabaseEnvironment(input, { nodeEnv: result.NODE_ENV, role: 'app' });
+  } catch (error) {
+    if (!(error instanceof EnvironmentValidationError)) throw error;
+    messages.push(error.message);
   }
-  return result;
+  const migrationKeys = Object.keys(input).filter(key => key.startsWith('DATABASE_MIGRATION_'));
+  if (migrationKeys.length) messages.push(`Las credenciales de migración no deben estar en el entorno de la aplicación: ${migrationKeys.sort().join(', ')}`);
+  if (messages.length || !database) throw new EnvironmentValidationError(messages.join('\n'));
+  return Object.assign(result, { DATABASE: database });
 }
