@@ -37,7 +37,7 @@ it('reconoce pg suelto y descarta valores inválidos', () => {
 });
 it.each([new Error('password=CANARIO_MSG'), new TypeORMError('password=CANARIO_MSG'), new InvalidInputError('password=CANARIO_MSG'), new HttpException('password=CANARIO_MSG', 503)])('errores genéricos %#', e => {
   Object.assign(e, { config: { password: 'CANARIO_CONFIG' }, request: 'CANARIO_REQUEST', response: 'CANARIO_RESPONSE', code: 'valid.code', statusCode: 503 });
-  expect(sanitizeError(e)).toMatchObject({ message: 'password=[REDACTED]', code: 'valid.code', statusCode: 503 });
+  expect(sanitizeError(e)).toMatchObject({ message: e instanceof TypeORMError ? 'Error de ORM (TypeORMError).' : 'password=[REDACTED]', code: 'valid.code', statusCode: 503 });
   expect(JSON.stringify(sanitizeError(e))).not.toContain('CANARIO_');
 });
 it('sanea causas, AggregateError, ciclos y profundidad', () => {
@@ -298,4 +298,26 @@ describe('claves reservadas en todos los niveles inspeccionados', () => {
     void level; void time; void pid; void hostname;
     expect(record).toEqual(legitimate);
   });
+});
+
+it('familia TypeORM omite criterios y valores preservando tipo y marcos', async () => {
+  const { EntityNotFoundError, EntityPropertyNotFoundError, MustBeEntityError } = await import('typeorm');
+  class CustomOrmError extends TypeORMError {}
+  const errors = [new EntityNotFoundError('CANARIO_ENTITY', { id: 'CANARIO_CRITERIA' }),
+    new EntityPropertyNotFoundError('CANARIO_PROPERTY', { targetName: 'CANARIO_ENTITY' } as never),
+    new MustBeEntityError('CANARIO_OPERATION', 'CANARIO_VALUE'), new TypeORMError('CANARIO_BASE'), new CustomOrmError('CANARIO_CUSTOM')];
+  for (const e of errors) {
+    const result = sanitizeError(e) as { type: string; message: string; stack: string };
+    expect(result.message).toBe(`Error de ORM (${result.type}).`); expect(result.stack).toContain('at ');
+    expect(JSON.stringify(result)).not.toContain('CANARIO_'); expect(sanitizeError(result)).toBe(result);
+  }
+});
+it('extractDatabaseFields comparte lista blanca y databaseVerb nunca devuelve SQL', async () => {
+  const { extractDatabaseFields, databaseVerb } = await import('./error-sanitizer');
+  expect(extractDatabaseFields(database())).toEqual({ sqlState: '23505', constraint: 'unique_name', table: 'content', column: 'title', schema: 'public', routine: '_bt_check_unique', severity: 'ERROR' });
+  for (const verb of ['INSERT', 'UPDATE', 'DELETE', 'SELECT', 'WITH', 'OTHER']) expect(databaseVerb({ query: `  ${verb.toLowerCase()} CANARIO_SQL` })).toBe(verb);
+  expect(databaseVerb({ query: 'DROP CANARIO_SQL' })).toBe('OTHER'); expect(databaseVerb({})).toBeUndefined();
+  const get = jest.fn(() => { throw new Error('CANARIO_GET'); });
+  expect(databaseVerb(Object.defineProperty({}, 'query', { get }))).toBeUndefined();
+  expect(extractDatabaseFields(Object.defineProperty({}, 'driverError', { get }))).toEqual({}); expect(get).not.toHaveBeenCalled();
 });

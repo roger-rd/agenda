@@ -52,7 +52,7 @@ class LoggingController {
     return { ok: true };
   }
 }
-type Entry = { req?: { id?: string; method?: string; url?: string; remoteAddress?: string }; msg?: string; context?: string; err?: { sqlState?: string; stack?: string; cause?: { sqlState?: string }; errors?: { sqlState?: string }[] } };
+type Entry = { level?: number; sqlState?: string; event?: string; req?: { id?: string; method?: string; url?: string; remoteAddress?: string }; msg?: string; context?: string; err?: { sqlState?: string; stack?: string; cause?: { sqlState?: string }; errors?: { sqlState?: string }[] } };
 describe('Logging seguro con Nest, pino-http y filtro real', () => {
   let app: INestApplication;
   let output = '';
@@ -79,7 +79,21 @@ describe('Logging seguro con Nest, pino-http y filtro real', () => {
     expect(completion?.req?.remoteAddress).toEqual(expect.any(String));
     expect(Object.keys(completion?.req ?? {}).sort()).toEqual(['id', 'method', 'remoteAddress', 'url']);
   }
-  it.each(['database', 'aggregate', 'cause'])('excepción %s tiene un único err y conserva marcos', async path => {
+  it('excepción database responde 409 sin err ni stack', async () => {
+    const response = await request(app.getHttpServer()).get('/database').expect(409);
+    expect(response.body.error.code).toBe('conflict');
+    noLeaks(response);
+    const records = entries();
+    const failures = records.filter(entry => entry.sqlState !== undefined);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({ level: 40, sqlState: '23505', event: 'unique_violation' });
+    for (const record of records) {
+      expect(record).not.toHaveProperty('err');
+      expect(record).not.toHaveProperty('stack');
+    }
+    expect(JSON.stringify(response.body)).not.toMatch(/constraint|table|sql|query|parameters/i);
+  });
+  it.each(['aggregate', 'cause'])('excepción %s tiene un único err y conserva marcos', async path => {
     const response = await request(app.getHttpServer()).get(`/${path}`).expect(500);
     noLeaks(response);
     const errors = entries().filter(entry => entry.err);

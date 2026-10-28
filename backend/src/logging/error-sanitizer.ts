@@ -100,6 +100,31 @@ export function isDatabaseError(value: unknown): boolean {
   return has(value, 'driverError') || (has(value, 'query') && has(value, 'parameters')) ||
     (valid(own(value, 'code'), /^[0-9A-Z]{5}$/) && (has(value, 'severity') || has(value, 'routine')));
 }
+export interface DatabaseFields {
+  sqlState?: string; constraint?: string; table?: string; column?: string;
+  schema?: string; routine?: string; severity?: string;
+}
+export function extractDatabaseFields(value: unknown): DatabaseFields {
+  const result: DatabaseFields = {};
+  const driver = own(value, 'driverError') ?? value;
+  const sqlState = own(driver, 'code');
+  if (valid(sqlState, /^[0-9A-Z]{5}$/)) result.sqlState = sqlState;
+  for (const key of ['constraint', 'table', 'column', 'schema', 'routine', 'severity'] as const) {
+    const field = own(driver, key);
+    const pattern = key === 'severity' ? /^(ERROR|FATAL|PANIC)$/ : key === 'routine' ? /^[A-Za-z0-9_]{1,64}$/ : /^[a-z0-9_]{1,63}$/;
+    if (valid(field, pattern)) result[key] = field;
+  }
+  return result;
+}
+export function databaseVerb(value: unknown): 'INSERT' | 'UPDATE' | 'DELETE' | 'SELECT' | 'WITH' | 'OTHER' | undefined {
+  const query = own(value, 'query');
+  if (typeof query !== 'string') return undefined;
+  const first = /^\s*([a-z]+)\b/i.exec(query)?.[1].toUpperCase();
+  switch (first) {
+    case 'INSERT': case 'UPDATE': case 'DELETE': case 'SELECT': case 'WITH': return first;
+    default: return 'OTHER';
+  }
+}
 export function isErrorLike(value: unknown): boolean {
   if (!value || typeof value !== 'object' || types.isProxy(value) || !inspectable(value)) return false;
   return types.isNativeError(value) || value instanceof Error || isDatabaseError(value);
@@ -134,20 +159,15 @@ function error(value: unknown, path: WeakSet<object>, depth: number): object {
     const result: Record<string, unknown> = { type };
     if (database) {
       result.database = true;
-      const driver = own(value, 'driverError') ?? value;
-      const sqlState = own(driver, 'code');
-      if (valid(sqlState, /^[0-9A-Z]{5}$/)) result.sqlState = sqlState;
-      for (const key of ['constraint', 'table', 'column', 'schema', 'routine', 'severity']) {
-        const field = own(driver, key);
-        const pattern = key === 'severity' ? /^(ERROR|FATAL|PANIC)$/ : key === 'routine' ? /^[A-Za-z0-9_]{1,64}$/ : /^[a-z0-9_]{1,63}$/;
-        if (valid(field, pattern)) result[key] = field;
-      }
+      Object.assign(result, extractDatabaseFields(value));
+      const sqlState = result.sqlState;
       if (sqlState === '40001' || sqlState === '40P01') result.retryable = true;
       result.message = typeof result.sqlState === 'string'
         ? `Error de base de datos ${result.sqlState} (${families[result.sqlState.slice(0, 2)] ?? 'otro'}).` : 'Error de base de datos.';
     } else {
       const message = own(value, 'message');
-      result.message = typeof message === 'string' ? scrubText(message) : NO_INSPECCIONABLE;
+      result.message = value instanceof TypeORMError ? `Error de ORM (${type}).`
+        : typeof message === 'string' ? scrubText(message) : NO_INSPECCIONABLE;
       const code = own(value, 'code');
       if (valid(code, /^[A-Za-z0-9_.-]{1,40}$/)) result.code = code;
       for (const key of ['status', 'statusCode']) {

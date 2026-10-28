@@ -88,3 +88,11 @@ async function expectSafeConnectionError(original: unknown, code: string | undef
     expect(initialize).toHaveBeenCalledTimes(1);
   } finally { initialize.mockRestore(); }
 }
+
+it('provee y exporta el registro vacío', async () => {
+  const { DatabaseModule } = await import('./database.module');
+  const { ConstraintRegistry } = await import('./errors/constraint-registry');
+  expect(Reflect.getMetadata('providers', DatabaseModule)).toContain(ConstraintRegistry);
+  expect(Reflect.getMetadata('exports', DatabaseModule)).toContain(ConstraintRegistry);
+  expect(new ConstraintRegistry().size).toBe(0);
+});

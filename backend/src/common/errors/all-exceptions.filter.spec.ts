@@ -1,3 +1,33 @@
+import { QueryFailedError, TypeORMError, EntityNotFoundError, OptimisticLockVersionMismatchError } from 'typeorm';
+import { DatabaseError } from 'pg';
+import { ConstraintRegistry } from '../../database/errors/constraint-registry';
+import { createOperationContext } from '../../database/errors/database-failure';
+import { wrapDatabaseError } from '../../database/errors/database-operation-error';
+const databaseRegistry = new ConstraintRegistry();
+databaseRegistry.register({ kind: 'unique', name: 'uq_title', code: 'title_conflict', field: 'title', message: 'Título duplicado.' });
+databaseRegistry.register({ kind: 'foreign_key', name: 'fk_parent', childTable: 'internal_child', parentTable: 'internal_parent', field: 'parentId' });
+const databaseRoutes: [string, number, string][] = [
+  ['23505', 409, 'conflict'], ['unique', 409, 'title_conflict'], ['23503', 400, 'invalid_input'],
+  ['fk_child_insert', 400, 'invalid_input'], ['fk_child_update', 400, 'invalid_input'], ['fk_parent_delete', 409, 'conflict'], ['fk_parent_update', 409, 'conflict'],
+  ['fk_update', 409, 'conflict'], ['fk_delete', 409, 'conflict'], ['23502', 500, 'internal_error'], ['23514', 500, 'internal_error'], ['22P02', 400, 'invalid_input'],
+  ...['40001', '40P01', '55P03', '57014', '57P01', 'pool', 'system', 'wrapped', 'atomic'].map(k => [k, 503, 'outcome_unknown'] as [string, number, string]),
+  ['42501', 500, 'internal_error'], ['42P01', 500, 'internal_error'], ['missing', 404, 'not_found'], ['optimistic', 409, 'conflict'], ['orm', 500, 'internal_error'],
+];
+function routeDatabaseError(kind: string): unknown {
+  if (kind === 'pool') return new Error('timeout exceeded when trying to connect');
+  if (kind === 'system') return Object.assign(new Error('CANARIO_MSG'), { code: 'ECONNREFUSED' });
+  if (kind === 'missing') return new EntityNotFoundError('CANARIO_ENTITY', { id: 'CANARIO_ID' });
+  if (kind === 'optimistic') return new OptimisticLockVersionMismatchError('CANARIO_ENTITY', 1, 2);
+  if (kind === 'orm') return new TypeORMError('CANARIO_WHERE');
+  const fk = kind.startsWith('fk_');
+  const code = kind === 'unique' ? '23505' : fk ? '23503' : ['wrapped', 'atomic'].includes(kind) ? '40001' : kind;
+  const operation = kind.endsWith('update') ? 'update' : kind.endsWith('delete') ? 'delete' : 'insert';
+  const error = new QueryFailedError(`${operation.toUpperCase()} CANARIO_SQL`, ['CANARIO_PARAM'], Object.assign(new DatabaseError('CANARIO_MSG', 1, 'error'),
+    { code, severity: 'ERROR', constraint: kind === 'unique' ? 'uq_title' : fk ? 'fk_parent' : undefined, table: 'internal_child', column: 'internal_title' }));
+  if (kind === 'wrapped' || kind === 'atomic') return wrapDatabaseError(error, createOperationContext({ operation, atomic: kind === 'atomic' }));
+  if (kind.startsWith('fk_child_') || kind.startsWith('fk_parent_')) return wrapDatabaseError(error, createOperationContext({ operation, table: kind.startsWith('fk_child_') ? 'internal_child' : 'internal_parent' }));
+  return error;
+}
 import 'reflect-metadata';
 import { ArgumentsHost, Controller, Get, HttpException, INestApplication, Param, Post, Req, Res } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -18,6 +48,8 @@ import { mappedError } from './error-codes';
 
 @Controller()
 class ErrorsController {
+  @Get('database/:kind') databaseGet(@Param('kind') kind: string) { throw routeDatabaseError(kind); }
+  @Post('database/:kind') databasePost(@Param('kind') kind: string) { throw routeDatabaseError(kind); }
   @Get('domain/:kind') domain(@Param('kind') kind: string) {
     const errors = { invalid: new InvalidInputError('Entrada incorrecta.', 'title'), missing: new NotFoundError(), forbidden: new ForbiddenError(), conflict: new ConflictError(), unauthenticated: new UnauthenticatedError() };
     throw errors[kind as keyof typeof errors];
@@ -53,7 +85,7 @@ describe('Filtro HTTP y logs', () => {
     const stream = new Writable({ write(chunk, _encoding, done) { output += String(chunk); done(); } });
     const module = await Test.createTestingModule({
       imports: [AppConfigModule, IdsModule, LoggerModule.forRoot({ pinoHttp: createLoggerOptions({ logLevel: 'info' }, stream), useExisting: true })],
-      controllers: [ErrorsController], providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],
+      controllers: [ErrorsController], providers: [{ provide: ConstraintRegistry, useValue: databaseRegistry }, { provide: APP_FILTER, useClass: AllExceptionsFilter }],
     }).overrideProvider(AppConfigService).useValue({ logLevel: 'info' }).compile();
     app = module.createNestApplication({ logger: false });
     await setupHttpLogging(app);
@@ -138,6 +170,21 @@ describe('Filtro HTTP y logs', () => {
     const uuid = new Uuid7Generator().next();
     await request(app.getHttpServer()).get(`/log/${uuid}`).expect(200);
     expect(logs()[0].req?.url).toBe(`/log/${uuid}`);
+  });
+  it.each(databaseRoutes.flatMap(row => ['get', 'post'].map(method => [...row, method] as const)))('BD HTTP %s %s %s %s', async (kind, status, code, method) => {
+    const response = await (method === 'get' ? request(app.getHttpServer()).get(`/database/${kind}`) : request(app.getHttpServer()).post(`/database/${kind}`)).expect(status);
+    const repeatable = method === 'get' || kind === 'atomic';
+    verify(response, status === 503 && repeatable ? 'service_unavailable' : code, kind === 'unique' ? 'title' : kind === 'fk_child_insert' || kind === 'fk_child_update' ? 'parentId' : undefined);
+    expect(JSON.stringify(response.body)).not.toMatch(/CANARIO_|internal_child|internal_parent|internal_title|uq_title|fk_parent/);
+    expect(output).not.toContain('CANARIO_');
+    const events = logs().filter(log => log.status === status);
+    expect(events).toHaveLength(1);
+    if (status === 500) expect(events[0].err?.stack).toContain('at ');
+    else expect(events[0]).not.toHaveProperty('err');
+    if (status === 503) {
+      expect(response.headers['retry-after']).toBe(repeatable ? ['40001', '40P01', '55P03', 'wrapped', 'atomic'].includes(kind) ? '1' : kind === '57014' ? '2' : '5' : undefined);
+      expect(response.headers['cache-control']).toBe(repeatable ? undefined : 'no-store');
+    }
   });
   it('headersSent termina sin escribir y no duplica la excepción', () => {
     const logger = { error: jest.fn() };

@@ -1,3 +1,4 @@
+import { ConstraintRegistry } from './errors/constraint-registry';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule, TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { DataSource, DataSourceOptions } from 'typeorm';
@@ -44,7 +45,7 @@ export async function safeDataSourceFactory(options?: DataSourceOptions): Promis
 @Module({
   imports: [TypeOrmModule.forRootAsync({ inject: [AppConfigService, PinoLogger],
     useFactory: databaseOptionsFactory, dataSourceFactory: safeDataSourceFactory })],
-  providers: [DatabaseIdentityService],
-  exports: [TypeOrmModule],
+  providers: [DatabaseIdentityService, ConstraintRegistry],
+  exports: [TypeOrmModule, ConstraintRegistry],
 })
 export class DatabaseModule {}
