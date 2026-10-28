@@ -1,13 +1,26 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
+import { PinoLogger } from 'nestjs-pino';
+import { AppConfigService } from './config/app-config.service';
+import { startupErrorMessage } from './startup-error';
+import { setupHttpLogging } from './logging/setup-http-logging';
+import { installFatalHandlers } from './logging/fatal-handlers';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
-  // Configuración provisional; T0.2 incorporará variables validadas.
-  const host = process.env.HOST ?? '127.0.0.1';
-  const port = Number(process.env.PORT ?? '3000');
-  await app.listen(port, host);
+  // La importación diferida permite capturar también errores de ConfigModule.forRoot.
+  const { AppModule } = await import('./app.module');
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, autoFlushLogs: false, abortOnError: false });
+  await setupHttpLogging(app);
+  app.flushLogs();
+  app.enableShutdownHooks();
+  const config = app.get(AppConfigService);
+  const logger = await app.resolve(PinoLogger);
+  installFatalHandlers(logger);
+  await app.listen(config.port, config.host);
+  logger.info({ host: config.host, port: config.port, env: config.env, logLevel: config.logLevel }, 'Servidor escuchando.');
 }
 
-void bootstrap();
+void bootstrap().catch((error: unknown) => {
+  process.stderr.write(`${startupErrorMessage(error)}\n`);
+  process.exit(1);
+});
