@@ -1,3 +1,4 @@
+import { DatabaseModule } from './database/database.module';
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { AppConfigModule } from './config/app-config.module';
@@ -6,7 +7,7 @@ import { AllExceptionsFilter } from './common/errors/all-exceptions.filter';
 import { LoggingModule } from './logging/logging.module';
 
 @Module({
-  imports: [AppConfigModule, IdsModule, LoggingModule],
+  imports: [AppConfigModule, IdsModule, LoggingModule, DatabaseModule],
   providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],
 })
 export class AppModule {}

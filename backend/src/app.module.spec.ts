@@ -1,4 +1,9 @@
 import 'reflect-metadata';
+import { Module } from '@nestjs/common';
+import { DatabaseModule } from './database/database.module';
+
+@Module({})
+class TestDatabaseModule {}
 import { Test } from '@nestjs/testing';
 
 import { setupHttpLogging } from './logging/setup-http-logging';
@@ -15,7 +20,7 @@ describe('AppModule', () => {
     const { AppModule } = await import('./app.module');
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    }).overrideModule(DatabaseModule).useModule(TestDatabaseModule).compile();
 
     const app = moduleRef.createNestApplication();
     try {

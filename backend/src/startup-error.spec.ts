@@ -9,7 +9,7 @@ describe('Mensaje de error de arranque', () => {
     expect(startupErrorMessage(error)).toBe(message);
   });
 
-  it.each(['EADDRINUSE', 'EACCES', 'EADDRNOTAVAIL', 'E_TEST_123'])('incluye únicamente el código válido %s', code => {
+  it.each(['EADDRINUSE', 'EACCES', 'EADDRNOTAVAIL', 'E_TEST_123', '28P01', 'ECONNREFUSED'])('incluye únicamente el código válido %s', code => {
     expect(startupErrorMessage({ code })).toBe(`No se pudo iniciar el servidor (${code}).`);
   });
 
@@ -17,7 +17,7 @@ describe('Mensaje de error de arranque', () => {
     expect(startupErrorMessage(error)).toBe('No se pudo iniciar el servidor.');
   });
 
-  it.each(['sk_live_x', 'eaddrinuse', ' EADDRINUSE', 'EADDR INUSE', 'EADDRINUSE ', '', 'E', 123, null])('rechaza el código inválido %p', code => {
+  it.each(['sk_live_x', 'eaddrinuse', ' EADDRINUSE', 'EADDR INUSE', 'EADDRINUSE ', '', 'E', 123, null, '28p01', '28P0', '28P011'])('rechaza el código inválido %p', code => {
     expect(startupErrorMessage({ code })).toBe('No se pudo iniciar el servidor.');
   });
 
