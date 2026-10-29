@@ -1,24 +1,27 @@
 import { pino, type Logger, type LogFn } from 'pino';
 import { isErrorLike, NO_INSPECCIONABLE, own, sanitizeError, sanitizeLogObject } from './error-sanitizer';
-import { scrubText } from './secret-registry';
+import { scrubText, RecordBudget } from './secret-registry';
 
 export function logMethodHook(this: Logger, args: Parameters<LogFn>, method: LogFn, level: number): void {
+  const budget = new RecordBudget();
   void level;
   let safe: unknown[];
   try {
     const first: unknown = args[0];
-    const message = (v: unknown) => own(sanitizeError(v), 'message') ?? NO_INSPECCIONABLE;
+    const message = (v: unknown) => own(sanitizeError(v, budget), 'message') ?? NO_INSPECCIONABLE;
     if (isErrorLike(first)) {
-      safe = [{ err: sanitizeError(first) }, typeof args[1] === 'string' ? scrubText(args[1], 4000) : message(first), ...args.slice(2)];
+      safe = [{ err: sanitizeError(first, budget) }, typeof args[1] === 'string' ? scrubText(args[1], 4000, budget) : message(first), ...args.slice(2)];
     } else if (first && typeof first === 'object') {
       const err = own(first, 'err');
-      safe = [sanitizeLogObject(first), ...(isErrorLike(err) && typeof args[1] !== 'string' ? [message(err), ...args.slice(1)] : args.slice(1))];
+      safe = [sanitizeLogObject(first, budget), ...(isErrorLike(err) && typeof args[1] !== 'string' ? [message(err), ...args.slice(1)] : args.slice(1))];
     } else if (typeof first === 'function' || typeof first === 'symbol') {
-      safe = [sanitizeLogObject({ value: first }).value, ...args.slice(1)];
+      safe = [sanitizeLogObject({ value: first }, budget).value, ...args.slice(1)];
     } else safe = [...args];
+    // O-4: se acepta temporalmente el doble cobro del mensaje: message(first)
+    // vuelve a sanear el error y el mensaje explícito pasa también por este map.
     // También los argumentos de interpolación: quick-format los procesa antes del formatter.
-    safe = safe.map((v: unknown, i: number) => typeof v === 'string' ? scrubText(v, 4000)
-      : i === 0 ? v : sanitizeLogObject({ value: v }).value) as Parameters<LogFn>;
+    safe = safe.map((v: unknown, i: number) => typeof v === 'string' ? scrubText(v, 4000, budget)
+      : i === 0 ? v : sanitizeLogObject({ value: v }, budget).value) as Parameters<LogFn>;
   } catch { safe = [{ saneado: NO_INSPECCIONABLE }, NO_INSPECCIONABLE]; }
   try { method.apply(this, safe as Parameters<LogFn>); }
   catch {

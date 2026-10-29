@@ -1,7 +1,19 @@
 import { types } from 'node:util';
 import { IncomingMessage, ServerResponse } from 'node:http';
 import { TypeORMError } from 'typeorm';
-import { scrubText } from './secret-registry';
+import { scrubText, RecordBudget, CADENA_LARGA } from './secret-registry';
+
+// El presupuesto de 128 KiB limita el TEXTO ANALIZADO por las rutas conectadas,
+// no el tamaño ni el coste absoluto del registro. Quedan fuera: serializadores
+// req/res (con sus guardas), TypeORM (umbral de 16 KiB por llamada), claves y
+// bindings de logger.child(). Tras agotarlo, las cadenas siguientes son '[LIMITE]'
+// en orden de recorrido. Las entradas directas reciben un presupuesto propio.
+// Registros normales (cadenas ≤ 16 KiB, total < 128 KiB, pilas ≤ 64 KiB)
+// conservan exactamente su salida; pilas mayores producen '[CADENA_LARGA]'.
+export const MAX_STACK_INPUT = 64 * 1024;
+function budgetOf(value: unknown): RecordBudget {
+  return RecordBudget.is(value) ? value : new RecordBudget();
+}
 
 export const CICLO = '[CICLO]';
 export const PROFUNDIDAD = '[PROFUNDIDAD]';
@@ -129,9 +141,10 @@ export function isErrorLike(value: unknown): boolean {
   if (!value || typeof value !== 'object' || types.isProxy(value) || !inspectable(value)) return false;
   return types.isNativeError(value) || value instanceof Error || isDatabaseError(value);
 }
-export function framesOnly(stack: unknown): string | undefined {
+export function framesOnly(stack: unknown, budget?: RecordBudget): string | undefined {
   if (typeof stack !== 'string') return undefined;
-  return stack.split('\n').slice(1).filter(line => /^\s+at\s/.test(line)).slice(0, 30).map(line => scrubText(line, 300)).join('\n');
+  if (stack.length > MAX_STACK_INPUT) return CADENA_LARGA;
+  return stack.split('\n').slice(1).filter(line => /^\s+at\s/.test(line)).slice(0, 30).map(line => scrubText(line, 300, budget)).join('\n');
 }
 function finish(value: Record<string, unknown>): object {
   Object.freeze(value);
@@ -143,8 +156,8 @@ const families: Record<string, string> = {
   '42': 'error de sintaxis o permisos', '08': 'error de conexión', '53': 'recursos insuficientes',
   '55': 'estado de objeto inválido', '57': 'operación cancelada',
 };
-function error(value: unknown, path: WeakSet<object>, depth: number): object {
-  if (typeof value === 'string') return finish({ type: 'string', message: scrubText(value) });
+function error(value: unknown, path: WeakSet<object>, depth: number, budget: RecordBudget): object {
+  if (typeof value === 'string') return finish({ type: 'string', message: scrubText(value, 500, budget) });
   if (value === null || typeof value !== 'object') return finish({ type: typeof value });
   if (types.isProxy(value)) return finish({ type: 'Error', message: PROXY });
   if (produced.has(value)) return value;
@@ -167,28 +180,28 @@ function error(value: unknown, path: WeakSet<object>, depth: number): object {
     } else {
       const message = own(value, 'message');
       result.message = value instanceof TypeORMError ? `Error de ORM (${type}).`
-        : typeof message === 'string' ? scrubText(message) : NO_INSPECCIONABLE;
+        : typeof message === 'string' ? scrubText(message, 500, budget) : NO_INSPECCIONABLE;
       const code = own(value, 'code');
       if (valid(code, /^[A-Za-z0-9_.-]{1,40}$/)) result.code = code;
       for (const key of ['status', 'statusCode']) {
         const status = own(value, key);
         if (typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599) result[key] = status;
       }
-      if (has(value, 'cause')) result.cause = error(own(value, 'cause'), path, depth + 1);
+      if (has(value, 'cause')) result.cause = error(own(value, 'cause'), path, depth + 1, budget);
       const errors = own(value, 'errors');
       if (value instanceof AggregateError && Array.isArray(errors) && !types.isProxy(errors)) {
         const length = own(errors, 'length') as number;
-        result.errors = Object.freeze(Array.from({ length: Math.min(length, 5) }, (_, i) => error(own(errors, String(i)), path, depth + 1)));
+        result.errors = Object.freeze(Array.from({ length: Math.min(length, 5) }, (_, i) => error(own(errors, String(i)), path, depth + 1, budget)));
       }
     }
     const rawStack = readStack(value);
-    const stack = rawStack === ACCESOR ? ACCESOR : framesOnly(rawStack);
+    const stack = rawStack === ACCESOR ? ACCESOR : framesOnly(rawStack, budget);
     if (stack !== undefined) result.stack = stack;
     return finish(result);
   } finally { path.delete(value); }
 }
-export function sanitizeError(value: unknown): object {
-  try { return error(value, new WeakSet(), 0); }
+export function sanitizeError(value: unknown, budget?: RecordBudget): object {
+  try { return error(value, new WeakSet(), 0, budgetOf(budget)); }
   catch { return finish({ type: 'Error', message: NO_INSPECCIONABLE }); }
 }
 export function safeContext(value: unknown): string {
@@ -201,7 +214,7 @@ const urlGet = (key: string) => Object.getOwnPropertyDescriptor(URL.prototype, k
 const protocol = urlGet('protocol'), host = urlGet('host'), pathname = urlGet('pathname');
 registerSafeSerializer(URL, value => `${protocol.call(value)}//${host.call(value)}${pathname.call(value)}`);
 
-interface State { path: WeakSet<object>; nodes: number }
+interface State { path: WeakSet<object>; nodes: number; budget: RecordBudget }
 function field(value: object, key: string, state: State, depth: number): unknown {
   if (state.nodes >= 500) return LIMITE;
   const d = Object.getOwnPropertyDescriptor(value, key);
@@ -209,7 +222,7 @@ function field(value: object, key: string, state: State, depth: number): unknown
   if (!d || !('value' in d)) { state.nodes++; return ACCESOR; }
   const v: unknown = d.value;
   if (key === 'context') { state.nodes++; return safeContext(v); }
-  if (key === 'err' || key === 'error') { state.nodes++; return sanitizeError(v); }
+  if (key === 'err' || key === 'error') { state.nodes++; return sanitizeError(v, state.budget); }
   if (depth === 0 && (key === 'req' || key === 'res') && v && typeof v === 'object' && inspectable(v) &&
     (httpOutputs.has(v) || (key === 'req' ? v instanceof IncomingMessage : v instanceof ServerResponse))) { state.nodes++; return v; }
   return walk(v, state, depth);
@@ -217,7 +230,7 @@ function field(value: object, key: string, state: State, depth: number): unknown
 function walk(value: unknown, state: State, depth: number): unknown {
   if (++state.nodes > 500) return LIMITE;
   if (value === null || value === undefined) return value;
-  if (typeof value === 'string') return scrubText(value, 4000);
+  if (typeof value === 'string') return scrubText(value, 4000, state.budget);
   if (typeof value === 'number' || typeof value === 'boolean') return value;
   if (typeof value === 'bigint') return String(value);
   if (types.isProxy(value)) return PROXY;
@@ -225,7 +238,7 @@ function walk(value: unknown, state: State, depth: number): unknown {
   if (!inspectable(value)) return PROXY;
   if (state.path.has(value)) return CICLO;
   if (depth >= 3) return PROFUNDIDAD;
-  if (types.isNativeError(value) || value instanceof Error || isDatabaseError(value)) return sanitizeError(value);
+  if (types.isNativeError(value) || value instanceof Error || isDatabaseError(value)) return sanitizeError(value, state.budget);
   if (types.isDate(value)) {
     const time = Date.prototype.getTime.call(value);
     return Number.isFinite(time) ? Date.prototype.toISOString.call(value) : NO_INSPECCIONABLE;
@@ -260,14 +273,14 @@ function walk(value: unknown, state: State, depth: number): unknown {
     return Object.freeze({ type: typeName(value) });
   } finally { state.path.delete(value); }
 }
-export function sanitizeLogObject(value: unknown): Record<string, unknown> {
+export function sanitizeLogObject(value: unknown, budget?: RecordBudget): Record<string, unknown> {
   try {
     if (!value || typeof value !== 'object') return { saneado: NO_INSPECCIONABLE };
     if (types.isProxy(value) || !inspectable(value)) return { saneado: PROXY };
     if (logs.has(value)) return value as Record<string, unknown>;
     const keys = Object.keys(value);
     if (keys.length > 50) return { saneado: LIMITE };
-    const state: State = { path: new WeakSet([value]), nodes: 0 };
+    const state: State = { path: new WeakSet([value]), nodes: 0, budget: budgetOf(budget) };
     const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
     for (const key of keys) result[key] = field(value, key, state, 0);
     logs.add(result);
