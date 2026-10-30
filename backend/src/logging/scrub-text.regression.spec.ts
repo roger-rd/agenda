@@ -15,8 +15,6 @@ function oracle(text: string, explicitSecrets: readonly string[], max = 500): st
 
 const knownCases: [string, string][] = [
   ['postgres://user:CANARIO_CLAVE@localhost/db', 'postgres://[REDACTED]@localhost/db'],
-  ['password="CANARIO_CLAVE"', 'password=[REDACTED]'],
-  ["token: 'CANARIO_TOKEN'", 'token: [REDACTED]'],
   ['Bearer CANARIO_TOKEN', 'Bearer [REDACTED]'],
   ['api-key=CANARIO_KEY', 'api-key=[REDACTED]'],
   ['authorization: Bearer CANARIO_AUTH', 'authorization: [REDACTED]'],
@@ -25,6 +23,41 @@ it.each(knownCases)('verifica el oráculo y la implementación: %s', (input, exp
   expect(oracle(input, [])).toBe(expected);
   expect(scrubText(input)).toBe(expected);
 });
+it.each([
+  ['password="CANARIO_CLAVE"', 'password=[REDACTED]', 'password="[REDACTED]"'],
+  ["token: 'CANARIO_TOKEN'", 'token: [REDACTED]', "token: '[REDACTED]'"],
+])('conserva comillas y documenta el oráculo anterior: %s', (input, oldExpected, expected) => {
+  expect(oracle(input, [])).toBe(oldExpected);
+  expect(scrubText(input)).toBe(expected);
+});
+
+function enAlcanceDeIgualdad(text: string): boolean {
+  return !/authorization|['"\\]|_(?:password|passwd|pwd|secret|token|api[_-]?key)|[A-Za-z0-9](?:Password|Passwd|Pwd|Passphrase|Secret|Token|ApiKey|PrivateKey|Authorization)|passphrase|private[_-]?key|(?:password|passwd|pwd|secret|token|api[_-]?key)[_-]?(?:access[_-]?)?(?:key|hash)/i.test(text);
+}
+
+// Detector independiente mínimo para el alcance sin comillas, authorization ni sufijos.
+function tieneExcesoAnidado(input: string): boolean {
+  for (const secret of [...explicitSecrets].sort((a, b) => b.length - a.length)) input = input.split(secret).join('[REDACTED]');
+  input = input.replace(/(?<![a-z0-9+.-])([0-9+.-]*[a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]*@/gi, '$1[REDACTED]@');
+  const intervals: { index: number; start: number; end: number }[] = [];
+  for (let index = 0; index < input.length; index++) {
+    const rest = input.slice(index);
+    if (index === 0 || !/[A-Za-z0-9]/.test(input[index - 1])) {
+      const key = /^(?:password|passwd|pwd|secret|token|api[_-]?key)\s*[=:]\s*/i.exec(rest);
+      if (key) {
+        const start = index + key[0].length;
+        const value = /^(?:Bearer\s+[^\s,;]+|[^\s,;]+)/i.exec(input.slice(start));
+        if (value) intervals.push({ index, start, end: start + value[0].length });
+      }
+    }
+    if (index === 0 || !/[A-Za-z0-9_]/.test(input[index - 1])) {
+      const bearer = /^Bearer\s+[^\s,;]+/i.exec(rest);
+      if (bearer) intervals.push({ index, start: index, end: index + bearer[0].length });
+    }
+  }
+  return intervals.some(a => intervals.some(b => a !== b && b.index >= a.start && b.index < a.end && b.end > a.end));
+}
+
 it('verifica el oráculo con secreto y truncado conocidos', () => {
   const secret = 'fake-password-for-unit-tests-0001';
   registerSecret(secret);
@@ -48,7 +81,7 @@ function randomGenerator(initial: number): () => number {
 
 // Reduce por eliminación hasta que ningún carácter se pueda quitar conservando el fallo.
 function minimalMismatch(input: string, max: number): string {
-  const differs = (text: string) => scrubText(text, max) !== oracle(text, explicitSecrets, max);
+  const differs = (text: string) => enAlcanceDeIgualdad(text) && !tieneExcesoAnidado(text) && scrubText(text, max) !== oracle(text, explicitSecrets, max);
   for (let size = Math.ceil(input.length / 2); size >= 1; size = Math.floor(size / 2)) {
     for (let index = 0; index < input.length;) {
       const candidate = input.slice(0, index) + input.slice(index + size);
@@ -62,11 +95,12 @@ function minimalMismatch(input: string, max: number): string {
 it('coincide con el oráculo en 20 000 cortos, 500 medianos, 20 largos y la frontera', () => {
   explicitSecrets.forEach(registerSecret);
   const random = randomGenerator(seed);
-  const fragments = ['abcXYZ', '0123456789', '+', '.', '-', ':', '/', '@', ' ', '\n', "'", '"', '://', 'password', 'token', 'api_key', 'secret', 'Bearer', 'authorization', 'ñ', 'e\u0301', '😀', 'ſ', '\u212a', ...explicitSecrets];
+  const fragments = ['abcXYZ', '0123456789', '+', '.', '-', ':', '/', '@', ' ', '\n', '://', 'password', 'token', 'api_key', 'secret', 'Bearer', 'ñ', 'e\u0301', '😀', 'ſ', '\u212a', ...explicitSecrets];
   const generate = (length: number) => {
     let text = '';
     while (text.length < length) text += fragments[Math.floor(random() * fragments.length)];
-    return text.slice(0, length);
+    const result = text.slice(0, length);
+    return enAlcanceDeIgualdad(result) ? result : 'x'.repeat(length);
   };
   const inputs: string[] = [];
   for (let i = 0; i < 20000; i++) inputs.push(generate(Math.floor(random() * 301)));
@@ -76,15 +110,18 @@ it('coincide con el oráculo en 20 000 cortos, 500 medianos, 20 largos y la fron
     inputs.push(i < 5 ? ['x', 'abc012', 'a.b-c+', '012345', '+.-abc'][i].repeat(length).slice(0, length) : generate(length));
   }
   inputs.push(generate(MAX_SCRUB_INPUT));
+  let excess = 0;
   inputs.forEach((input, index) => {
+    expect(enAlcanceDeIgualdad(input)).toBe(true);
     const max = maxima[index % maxima.length];
     if (scrubText(input, max) !== oracle(input, explicitSecrets, max)) {
+      if (tieneExcesoAnidado(input)) { excess++; return; }
       const minimal = minimalMismatch(input, max);
       throw new Error(JSON.stringify({ seed, index, max, input: minimal, actual: scrubText(minimal, max), expected: oracle(minimal, explicitSecrets, max) }));
     }
   });
   expect(scrubText('x'.repeat(MAX_SCRUB_INPUT + 1))).toBe(CADENA_LARGA);
-  console.info(`Diferencial: semilla=${seed}, cortos=20000, medianos=500, largos=20, frontera=1`);
+  console.info(`Diferencial: semilla=${seed}, cortos=20000, medianos=500, largos=20, frontera=1, diferencias con X=${excess}`);
 });
 
 it.each([
@@ -166,9 +203,9 @@ it('comprueba límites antes de split y replace, y los usa en el camino normal',
     expect(exhausted).toBe(LIMITE_PRESUPUESTO);
     expect(calls).toEqual([0, 0]);
     split.mockClear(); replace.mockClear();
-    const normal = scrubText('FICTICIO_1234', 500, new RecordBudget('FICTICIO_1234'.length));
+    const normal = scrubText('FICTICIO_1234 a://u:p@h', 500, new RecordBudget('FICTICIO_1234 a://u:p@h'.length));
     const normalCalls = [split.mock.calls.length, replace.mock.calls.length];
-    expect(normal).toBe('[REDACTED]');
+    expect(normal).toBe('[REDACTED] a://[REDACTED]@h');
     expect(normalCalls[0]).toBeGreaterThan(0);
     expect(normalCalls[1]).toBeGreaterThan(0);
   } finally { split.mockRestore(); replace.mockRestore(); }

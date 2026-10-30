@@ -35,8 +35,8 @@ it('restringe el reinicio a pruebas', () => {
 });
 it.each([
   ['postgres://user:CANARIO_CLAVE@localhost/db', 'postgres://[REDACTED]@localhost/db'],
-  ['password="CANARIO_CLAVE"', 'password=[REDACTED]'],
-  ["token: 'CANARIO_TOKEN'", 'token: [REDACTED]'],
+  ['password="CANARIO_CLAVE"', 'password="[REDACTED]"'],
+  ["token: 'CANARIO_TOKEN'", "token: '[REDACTED]'"],
   ['Bearer CANARIO_TOKEN', 'Bearer [REDACTED]'],
   ['api-key=CANARIO_KEY', 'api-key=[REDACTED]'],
 ])('depura patrones %s', (input, expected) => expect(scrubText(input)).toBe(expected));
