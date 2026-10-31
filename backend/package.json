@@ -11,7 +11,9 @@
     "start": "node dist/main",
     "start:dev": "nest start --watch",
     "lint": "eslint . --max-warnings 0",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test:db": "node scripts/test-db.cjs",
+    "test:db:slow": "node scripts/test-db.cjs --slow",
     "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js"
   },
   "dependencies": {
