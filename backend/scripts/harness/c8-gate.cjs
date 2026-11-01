@@ -50,7 +50,15 @@ const ROLE_QUERY = `SELECT oid,
 FROM pg_catalog.pg_roles WHERE rolname <> $1`;
 const DEFAULT_QUERY = `SELECT d.oid FROM pg_catalog.pg_default_acl d
 JOIN pg_catalog.pg_namespace n ON n.oid = d.defaclnamespace WHERE n.nspname = $1`;
-const QUERY_CONTRACT = Object.freeze({ materialized: EFFECTIVE_QUERY, roles: ROLE_QUERY, defaultsQuery: DEFAULT_QUERY,
+const GLOBAL_DEFAULT_QUERY = `SELECT r.rolname AS owner_role, d.defaclobjtype AS object_type,
+  COALESCE(a.grantee = 0, false) AS grantee_public,
+  COALESCE(g.rolname = 'agenda_test_app', false) AS grantee_app
+FROM pg_catalog.pg_default_acl d
+JOIN pg_catalog.pg_roles r ON r.oid = d.defaclrole
+LEFT JOIN LATERAL pg_catalog.aclexplode(d.defaclacl) a ON true
+LEFT JOIN pg_catalog.pg_roles g ON g.oid = a.grantee
+WHERE d.defaclnamespace = 0`;
+const QUERY_CONTRACT = Object.freeze({ materialized: EFFECTIVE_QUERY, roles: ROLE_QUERY, defaultsQuery: DEFAULT_QUERY, globalDefaultsQuery: GLOBAL_DEFAULT_QUERY,
   effective: Object.freeze(['has_schema_privilege', 'has_table_privilege', 'has_any_column_privilege',
     'has_sequence_privilege', 'has_function_privilege', 'pg_has_role']),
   diagnostic: 'aclexplode', defaults: 'pg_default_acl' });
@@ -84,4 +92,24 @@ function evaluate(schemas, inspect, phase, roles) {
     return Object.freeze({ ok: true, code: 'ok', exitCode: 0 });
   } catch { return Object.freeze({ ok: false, code: 'gate_unknown', exitCode: 2 }); }
 }
-module.exports = Object.freeze({ QUERY_CONTRACT, recognized, writable, evaluate });
+/** Global defaults affect NEW objects, independently of effective/schema ACLs.
+ * C8.6 must integrate this gate: the existing preflight does not invoke it.
+ * @param {unknown} info */
+function evaluateGlobalDefaultAcl(info) {
+  const unknown = Object.freeze({ ok: false, code: 'gate_unknown', exitCode: 2 });
+  try {
+    if (!info || typeof info !== 'object') return unknown;
+    const value = /** @type {{evaluable?:unknown,entries?:unknown}} */ (info);
+    if (value.evaluable !== true || !Array.isArray(value.entries)) return unknown;
+    let veto = false;
+    for (const entry of value.entries) {
+      if (!entry || typeof entry.ownerRole !== 'string' || !entry.ownerRole ||
+          !['r', 'S', 'f', 'T', 'n'].includes(entry.objectType) ||
+          typeof entry.granteePublic !== 'boolean' || typeof entry.granteeApp !== 'boolean') return unknown;
+      if (['agenda_test_owner', 'agenda_test_app'].includes(entry.ownerRole) &&
+          (entry.granteePublic || entry.granteeApp)) veto = true;
+    }
+    return Object.freeze({ ok: !veto, code: veto ? 'gate_default_acl' : 'ok', exitCode: veto ? 2 : 0 });
+  } catch { return unknown; }
+}
+module.exports = Object.freeze({ QUERY_CONTRACT, recognized, writable, evaluate, evaluateGlobalDefaultAcl });

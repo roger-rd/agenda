@@ -1,4 +1,4 @@
-import { evaluate, recognized, writable, QUERY_CONTRACT } from '../../scripts/harness/c8-gate.cjs';
+import { evaluate, recognized, writable, QUERY_CONTRACT, evaluateGlobalDefaultAcl } from '../../scripts/harness/c8-gate.cjs';
 import { schema, privileges, RUN, fake } from './support/c8-fakes';
 const roles = { evaluable: true, membership: false, setMembership: false };
 describe('C8 puerta efectiva', () => {
@@ -48,5 +48,38 @@ describe('C8 puerta efectiva', () => {
     expect(QUERY_CONTRACT.roles).toContain("'MEMBER'"); expect(QUERY_CONTRACT.roles).toContain("'SET'");
     expect(QUERY_CONTRACT.defaultsQuery).toContain('pg_default_acl');
     expect(QUERY_CONTRACT.effective).toContain('has_any_column_privilege'); expect(QUERY_CONTRACT.effective).toContain('pg_has_role');
+  });
+});
+
+describe('H5 ACL global independiente de efectivos y ACL de esquema', () => {
+  const global = { evaluable: true, entries: [{ ownerRole: 'agenda_test_owner', objectType: 'r', granteePublic: true, granteeApp: false }] };
+  const clean = { evaluable: true, entries: [] };
+  it.each([false, true])('global presente con efectivo residual=%s', residual => {
+    const p = privileges(); p.objects[0].direct = residual;
+    expect(evaluate([schema()], () => p, 'P6b', roles).code).toBe(residual ? 'gate_residual' : 'ok');
+    expect(evaluateGlobalDefaultAcl(global)).toEqual({ ok: false, code: 'gate_default_acl', exitCode: 2 });
+  });
+  it('efectivo residual sin ACL global', () => {
+    const p = privileges(); p.objects[0].direct = true;
+    expect(evaluate([schema()], () => p, 'P6b', roles).code).toBe('gate_residual');
+    expect(evaluateGlobalDefaultAcl(clean)).toEqual({ ok: true, code: 'ok', exitCode: 0 });
+  });
+  it('ACL de esquema no activa la global ni viceversa', () => {
+    const p = { ...privileges(), defaultAcl: true };
+    expect(evaluate([schema()], () => p, 'P6b', roles).ok).toBe(false);
+    expect(evaluateGlobalDefaultAcl(clean).ok).toBe(true);
+    expect(evaluate([schema()], privileges, 'P6b', roles).ok).toBe(true);
+    expect(evaluateGlobalDefaultAcl(global).ok).toBe(false);
+  });
+  it.each([null, {}, { evaluable: false, entries: [] }, { evaluable: true, entries: null },
+    { evaluable: true, entries: [null] }, { evaluable: true, entries: [{ ...global.entries[0], granteePublic: null }] },
+    { evaluable: true, entries: [{ ...global.entries[0], objectType: 'unknown' }] }])('estructura desconocida %#', info => {
+    expect(evaluateGlobalDefaultAcl(info)).toEqual({ ok: false, code: 'gate_unknown', exitCode: 2 });
+  });
+  it('otro rol se ignora; solo REVOKE no veta; grants app y PUBLIC sí', () => {
+    expect(evaluateGlobalDefaultAcl({ ...global, entries: [{ ...global.entries[0], ownerRole: 'other' }] }).ok).toBe(true);
+    expect(evaluateGlobalDefaultAcl({ ...global, entries: [{ ...global.entries[0], granteePublic: false }] }).ok).toBe(true);
+    for (const ownerRole of ['agenda_test_owner', 'agenda_test_app']) expect(evaluateGlobalDefaultAcl({ ...global,
+      entries: [{ ...global.entries[0], ownerRole, granteePublic: false, granteeApp: true }] }).code).toBe('gate_default_acl');
   });
 });
