@@ -218,3 +218,76 @@ describe('C8 corrección: processID inválido al conectar', () => {
     }
   });
 });
+
+describe('C8 conector: errores asíncronos de conexión (D-1)', () => {
+  const secretError = () => Object.assign(new Error(`${PASSWORD} SELECT 1 postgres://u:${PASSWORD}@h/db`),
+    { code: '57P01', stack: `${PASSWORD} at secret` });
+  const leaks = (value: unknown) => [JSON.stringify(value), inspect(value), String(value)]
+    .some(text => [PASSWORD, 'SELECT 1', 'postgres://', 'at secret'].some(needle => text.includes(needle)));
+  async function connected(role: 'owner' | 'app' = 'app') {
+    const f = pgFake(); const c = await createConnector({ pgModule: f.pgModule }).connect(role, credentials(role));
+    return { f, c, client: f.instances[0] };
+  }
+  it('error con la conexión inactiva no lanza, invalida el cliente y libera la reserva', async () => {
+    const { f, c, client } = await connected();
+    expect(() => client.emit('error', secretError())).not.toThrow();
+    f.calls.length = 0;
+    await expect(c.query('server')).rejects.toEqual({ code: 'connection_lost' });
+    expect(f.calls).toEqual([]); expect(client.destroyed).toBe(true);
+    const again = await createConnector({ pgModule: f.pgModule }).connect('app', credentials('app')); await again.end(); await c.end();
+  });
+  it('error durante una operación falla de forma segura sin filtrar datos', async () => {
+    const { f, c, client } = await connected();
+    f.controls.before = async sql => { if (sql === lookup('server').sql) { client.emit('error', secretError()); throw secretError(); } };
+    let error: unknown;
+    try { await c.query('server'); } catch (e) { error = e; }
+    expect(error).toMatchObject({ code: 'connection_lost' });
+    expect(Object.keys(error as object).every(k => ['code', 'sqlstate'].includes(k))).toBe(true);
+    expect(leaks(error)).toBe(false); expect(client.destroyed).toBe(true);
+    expect(f.calls.map(x => x.sql)).not.toContain('COMMIT');
+    await c.end();
+  });
+  it('una conexión invalidada no vuelve a usarse: ninguna sentencia llega al cliente', async () => {
+    const { f, c, client } = await connected('owner');
+    client.emit('error', secretError()); f.calls.length = 0;
+    for (const id of ['server', 'identity', 'probe_42809']) {
+      await expect(c.query(id, id === 'probe_42809' ? ['agenda_test_app'] : [])).rejects.toEqual({ code: 'connection_lost' });
+    }
+    expect(f.calls).toEqual([]); expect(f.events.filter(e => e.startsWith('owner:'))).toEqual([]);
+  });
+  it('cierre tras el error: end y destroy no lanzan, se destruye una sola vez y no se llama a end() del driver', async () => {
+    const { c, client } = await connected(); const destroy = jest.spyOn(client, 'destroy');
+    client.emit('error', secretError());
+    await expect(c.end()).resolves.toBeUndefined(); await expect(c.destroy()).resolves.toBeUndefined();
+    expect(destroy).toHaveBeenCalledTimes(1); expect(client.ended).toBe(false);
+  });
+  it('un error posterior al cierre no lanza ni libera dos veces la reserva', async () => {
+    const { f, c, client } = await connected(); await c.end();
+    expect(() => client.emit('error', secretError())).not.toThrow();
+    const first = await createConnector({ pgModule: f.pgModule }).connect('app', credentials('app'));
+    await expect(createConnector({ pgModule: f.pgModule }).connect('app', credentials('app'))).rejects.toEqual({ code: 'budget_exceeded' });
+    await first.end();
+  });
+  it('el listener existe antes de connect(): un error emitido durante connect no es excepción no capturada', async () => {
+    const f = pgFake(); const original = f.pgModule.Client.prototype.connect;
+    f.pgModule.Client.prototype.connect = async function patched(this: InstanceType<typeof f.pgModule.Client>) {
+      this.emit('error', secretError()); return original.call(this);
+    };
+    try {
+      const c = await createConnector({ pgModule: f.pgModule }).connect('app', credentials('app'));
+      await expect(c.query('server')).rejects.toEqual({ code: 'connection_lost' });
+    } finally { f.pgModule.Client.prototype.connect = original; }
+  });
+  it('un cliente sin emisor de eventos se rechaza cerrado y libera la reserva', async () => {
+    const f = pgFake();
+    class Bare { processID = 7; async connect() { return undefined; } async query() { return { rows: [] }; } async end() { return undefined; } }
+    await expect(createConnector({ pgModule: { Client: Bare as never } }).connect('app', credentials('app'))).rejects.toEqual({ code: 'connect_failed' });
+    const ok = await createConnector({ pgModule: f.pgModule }).connect('app', credentials('app')); await ok.end();
+  });
+  it('los mensajes crudos del error de conexión nunca aparecen en la reserva, la API ni los eventos', async () => {
+    const { f, c, client } = await connected();
+    client.emit('error', secretError());
+    expect(leaks(c)).toBe(false); expect(leaks(f.events)).toBe(false);
+    expect(leaks(f.calls)).toBe(false); await c.end();
+  });
+});

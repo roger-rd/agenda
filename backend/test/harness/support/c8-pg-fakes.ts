@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { lookup, SYSTEM, CATALOG } from '../../../scripts/harness/c8-pg-queries.cjs';
 import { L0_KEY, EXPECTED, EMPTY_FIELDS } from '../../../scripts/harness/c8-pg-adapter.cjs';
 import { TARGET } from '../../../scripts/harness/c8-target.cjs';
@@ -39,12 +40,13 @@ export function pgFake() {
   let heldBy = 0;
   const controls = { connectError: undefined as unknown, endError: undefined as unknown,
     before: async (_sql: string) => { void _sql; } };
-  class FakeClient {
+  class FakeClient extends EventEmitter {
     processID: number;
     role: 'owner' | 'app';
     destroyed = false;
     ended = false;
     constructor(config: Record<string, unknown>) {
+      super();
       configs.push(config); instances.push(this); this.processID = 99 + instances.length;
       this.role = config.user === TARGET.owner ? 'owner' : 'app';
     }

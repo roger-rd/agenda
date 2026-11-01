@@ -10,7 +10,8 @@ const BUDGETS = Object.freeze({ A: Object.freeze({ owner: 1, app: 1 }), B: Objec
 // Shared across connectors, so creating another connector cannot evade a peak limit.
 const active = { A: { owner: 0, app: 0 }, B: { owner: 0, app: 0 } };
 /** @typedef {{query:(sql:string,params:unknown[])=>Promise<{rows:unknown}>,connect:()=>Promise<unknown>,
- * end:()=>Promise<unknown>,destroy?:()=>void,processID?:number}} RawClient */
+ * end:()=>Promise<unknown>,destroy?:()=>void,processID?:number,
+ * on:(event:'error',listener:()=>void)=>unknown}} RawClient */
 /** @typedef {{Client:new(config:Record<string,unknown>)=>RawClient}} PgModule */
 /** Plain frozen errors deliberately have NO message, stack, cause, or driver object.
  * @param {string} code @param {unknown} [err] */
@@ -27,7 +28,7 @@ function createConnector(options = {}) {
   async function connect(role, credentials) {
     let level = /** @type {'A'|'B'} */ ('A');
     /** @type {RawClient|undefined} */ let raw;
-    let reserved = false; let closed = false;
+    let reserved = false; let closed = false; let broken = false;
     const release = () => { if (reserved) { active[level][role]--; reserved = false; } };
     const destroy = async () => {
       if (closed) return;
@@ -60,6 +61,11 @@ function createConnector(options = {}) {
         lock_timeout: role === 'app' ? MATRIX.appLock : MATRIX.ownerLock,
         idle_in_transaction_session_timeout: role === 'app' ? MATRIX.appIdleInTx : MATRIX.ownerIdleInTx,
         options: '-c default_transaction_read_only=on', application_name: APPLICATION_NAME, ssl: false });
+      // pg emits 'error' for connection-level failures (reset, server FATAL, unexpected end). Without a
+      // listener Node raises an uncaught exception that prints driver text. The listener drops the error
+      // object, marks the connection unusable and releases it; it never logs or retains anything.
+      if (typeof raw.on !== 'function') throw failure('connect_failed');
+      raw.on('error', () => { broken = true; void destroy(); });
       await raw.connect();
       const client = raw;
       /** @type {Promise<unknown>} */ let tail = Promise.resolve();
@@ -73,7 +79,7 @@ function createConnector(options = {}) {
           values = Array.prototype.map.call(params, (/** @type {unknown} */ p) => Array.isArray(p) ? [...p] : p);
         } catch { invalidParams = true; }
         const next = tail.then(async () => {
-          if (closed) throw failure('client_closed');
+          if (closed) throw failure(broken ? 'connection_lost' : 'client_closed');
           if (++queries > (role === 'owner' ? 30 : 10)) { await destroy(); throw failure('budget_exceeded'); }
           let started = false; let result; let caught; let failed = false; let expected = false;
           try {
@@ -95,7 +101,7 @@ function createConnector(options = {}) {
             if (started) try { await client.query(SYSTEM.rollback, []); }
             catch (err) { caught = err; failed = true; }
           }
-          if (failed) { await destroy(); throw failure('query_failed', caught); }
+          if (failed) { await destroy(); throw failure(broken ? 'connection_lost' : 'query_failed', caught); }
           if (id === 'probe_42809') return Object.freeze(expected ? { expectedSqlstate: '42809' } : { probeFailed: true });
           /** @type {unknown} */ let rows;
           try {
