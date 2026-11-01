@@ -62,9 +62,11 @@ function envReferences(source: string): string[] {
 }
 
 describe('guardas estáticas B1', () => {
-  it('mantiene solo la excepción de supervisor y los 13 módulos autorizados', () => {
+  it('mantiene solo la excepción de supervisor y los 24 módulos autorizados', () => {
     expect(ALLOW).toEqual({ 'supervisor.cjs': ['forbidden-module'] });
-    expect(modules).toEqual(['c8-contract.cjs', 'child-env.cjs', 'constants.cjs', 'env-files.cjs',
+    expect(modules).toEqual(['c8-budget.cjs', 'c8-cleanup-policy.cjs', 'c8-contract.cjs', 'c8-ddl-filter.cjs',
+      'c8-ddl-templates.cjs', 'c8-gate.cjs', 'c8-lease-key.cjs', 'c8-names.cjs', 'c8-preflight.cjs',
+      'c8-sweep-policy.cjs', 'c8-target.cjs', 'c8-timeouts.cjs', 'child-env.cjs', 'constants.cjs', 'env-files.cjs',
       'harness-error.cjs', 'main.cjs', 'post-scan.cjs', 'redaction-stream.cjs', 'redactor.cjs',
       'run-token.cjs', 'secret-variants.cjs', 'summary.cjs', 'supervisor.cjs']);
   });
