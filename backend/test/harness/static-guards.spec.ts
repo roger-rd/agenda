@@ -4,8 +4,8 @@ import * as ts from 'typescript';
 import * as vm from 'node:vm';
 import { createRequire } from 'node:module';
 
-// B1 no tiene excepciones. B2 deberá revisar expresamente esta tabla.
-const ALLOW: Readonly<Record<string, readonly string[]>> = Object.freeze({});
+// B2 permite child_process exclusivamente en supervisor.
+const ALLOW: Readonly<Record<string, readonly string[]>> = Object.freeze({ 'supervisor.cjs': ['forbidden-module'] });
 const directory = path.resolve(__dirname, '../../scripts/harness');
 const modules = fs.readdirSync(directory).filter(name => name.endsWith('.cjs')).sort();
 const newSpecs = ['constants', 'harness-error', 'c8-contract', 'run-token', 'child-env',
@@ -62,10 +62,25 @@ function envReferences(source: string): string[] {
 }
 
 describe('guardas estáticas B1', () => {
-  it('mantiene ALLOW vacío y solo los siete módulos autorizados', () => {
-    expect(ALLOW).toEqual({});
+  it('mantiene solo la excepción de supervisor y los 13 módulos autorizados', () => {
+    expect(ALLOW).toEqual({ 'supervisor.cjs': ['forbidden-module'] });
     expect(modules).toEqual(['c8-contract.cjs', 'child-env.cjs', 'constants.cjs', 'env-files.cjs',
-      'harness-error.cjs', 'run-token.cjs', 'summary.cjs']);
+      'harness-error.cjs', 'main.cjs', 'post-scan.cjs', 'redaction-stream.cjs', 'redactor.cjs',
+      'run-token.cjs', 'secret-variants.cjs', 'summary.cjs', 'supervisor.cjs']);
+  });
+  it('child_process permanece prohibido fuera de supervisor', () => {
+    const hits = staticViolations('require("node:child_process")');
+    for (const name of modules.filter(name => name !== 'supervisor.cjs')) {
+      expect(hits.filter(hit => !(ALLOW[name] ?? []).includes(hit))).toEqual(['forbidden-module']);
+    }
+    expect(hits.filter(hit => !(ALLOW['supervisor.cjs'] ?? []).includes(hit))).toEqual([]);
+  });
+  it.each([
+    ['console.log(x)', 'console'], ['process.env', 'process-env'], ['eval(x)', 'dynamic-code'],
+    ['fs.writeFileSync(p, x)', 'fs-write'], ['fs.openSync(p, "w")', 'fs-open-flags'],
+  ])('supervisor conserva las otras prohibiciones %#', (source, hit) => {
+    expect(staticViolations(`require("child_process"); ${source}`)
+      .filter(value => !(ALLOW['supervisor.cjs'] ?? []).includes(value))).toContain(hit);
   });
   it.each(modules)('%s no usa APIs prohibidas', name => {
     const source = fs.readFileSync(path.join(directory, name), 'utf8');
