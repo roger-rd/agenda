@@ -1,4 +1,4 @@
-import { lookup, SYSTEM } from '../../../scripts/harness/c8-pg-queries.cjs';
+import { lookup, SYSTEM, CATALOG } from '../../../scripts/harness/c8-pg-queries.cjs';
 import { L0_KEY, EXPECTED, EMPTY_FIELDS } from '../../../scripts/harness/c8-pg-adapter.cjs';
 import { TARGET } from '../../../scripts/harness/c8-target.cjs';
 export const NAME = 'uow_2611011200_abc123_1';
@@ -11,6 +11,8 @@ export const roleAttrs = () => ['owner', 'app'].map((role, i) => ({ oid: 10 + i,
   rolreplication: false, rolbypassrls: false, rolcanlogin: true, rolconnlimit: -1, rolconfig: null }));
 export const server = () => ({ version: '160004', max_connections: '100', statement_timeout: '5s',
   lock_timeout: '2s', idle_in_transaction_session_timeout: '15s', idle_session_timeout: '0', search_path: '"$user", public' });
+export const identityEvidence = () => ({ version_text: 'PostgreSQL 16.4 on synthetic', server_addr: '10.0.0.2',
+  postmaster_epoch: String(NOW / 1000 - 3600), server_now_epoch: String(NOW / 1000) });
 export const coverage = () => [{ schema_oid: 20, tables: '1', sequences: '1', routines: '1' }];
 export function effective() {
   return Object.entries(EXPECTED).flatMap(([kind, privileges]) => privileges.map(privilege => ({ kind,
@@ -28,6 +30,8 @@ export function seeded(seed = 82901) {
 export type RecordCall = { sql: string; params: unknown[]; pid: number };
 export function pgFake() {
   const calls: RecordCall[] = [];
+  const events: string[] = [];
+  const logicalCalls: { role: string; id: string; params: unknown[] }[] = [];
   const configs: Record<string, unknown>[] = [];
   const instances: FakeClient[] = [];
   const results = new Map<string, unknown>();
@@ -44,8 +48,11 @@ export function pgFake() {
       configs.push(config); instances.push(this); this.processID = 99 + instances.length;
       this.role = config.user === TARGET.owner ? 'owner' : 'app';
     }
-    async connect() { if (controls.connectError) throw controls.connectError; }
+    async connect() { events.push(`connect:${this.role}`); if (controls.connectError) throw controls.connectError; }
     async query(sql: string, params: unknown[]) {
+      if (this.ended || this.destroyed) throw { code: '08003' };
+      const entry = CATALOG.find(q => q.sql === sql);
+      if (entry) { events.push(`${this.role}:${entry.id}`); logicalCalls.push({ role: this.role, id: entry.id, params: structuredClone(params) }); }
       calls.push({ sql, params: structuredClone(params), pid: this.processID });
       await controls.before(sql);
       if (errors.has(sql)) throw errors.get(sql);
@@ -53,6 +60,7 @@ export function pgFake() {
       if (Object.values(SYSTEM).some(value => value === sql)) return { rows: [] };
       if (sql === lookup('identity').sql) return { rows: [identity(this.role, this.processID)] };
       if (sql === lookup('role_attrs').sql) return { rows: roleAttrs() };
+      if (sql === lookup('identity_evidence').sql) return { rows: [identityEvidence()] };
       if (sql === lookup('server').sql) return { rows: [server()] };
       if (sql === lookup('probe_42809').sql) throw { code: '42809', message: PASSWORD, stack: PASSWORD };
       if (sql === lookup('role_membership').sql) return { rows: [{ oid: 10, membership: false, set_membership: false }] };
@@ -77,7 +85,7 @@ export function pgFake() {
     async end() { this.ended = true; if (heldBy === this.processID) heldBy = 0; if (controls.endError) throw controls.endError; }
     destroy() { this.destroyed = true; if (heldBy === this.processID) heldBy = 0; }
   }
-  return { pgModule: { Client: FakeClient }, calls, configs, instances, results, errors, controls,
+  return { pgModule: { Client: FakeClient }, calls, events, logicalCalls, configs, instances, results, errors, controls,
     set: (id: string, value: unknown) => results.set(lookup(id).sql, value),
     fail: (id: string, code: string) => errors.set(lookup(id).sql, { code, message: PASSWORD, stack: PASSWORD }),
     nullRows: (id: string) => results.set(lookup(id).sql, null),

@@ -63,6 +63,7 @@ function createConnector(options = {}) {
       await raw.connect();
       const client = raw;
       /** @type {Promise<unknown>} */ let tail = Promise.resolve();
+      let queries = 0;
       /** @param {string} id @param {unknown[]} [params] */
       function query(id, params = []) {
         // Capture parameters immediately; caller mutations cannot change validated input.
@@ -73,7 +74,8 @@ function createConnector(options = {}) {
         } catch { invalidParams = true; }
         const next = tail.then(async () => {
           if (closed) throw failure('client_closed');
-          let started = false; let result; let caught; let failed = false;
+          if (++queries > (role === 'owner' ? 30 : 10)) { await destroy(); throw failure('budget_exceeded'); }
+          let started = false; let result; let caught; let failed = false; let expected = false;
           try {
             if (invalidParams) throw failure('query_failed');
             const q = getQuery(id, { levelB: level === 'B' && levelB });
@@ -83,8 +85,9 @@ function createConnector(options = {}) {
             if (id === 'probe_42809') await client.query(SYSTEM.savepoint, []);
             try { result = await client.query(q.sql, values); }
             catch (err) {
-              if (id === 'probe_42809') await client.query(SYSTEM.rollbackProbe, []);
-              throw err;
+              if (id !== 'probe_42809' || classifyPgError(err, 'probe-42809').kind !== 'expected') throw err;
+              await client.query(SYSTEM.rollbackProbe, []);
+              expected = true;
             }
             if (id === 'probe_42809') await client.query(SYSTEM.releaseProbe, []);
           } catch (err) { caught = err; failed = true; }
@@ -93,15 +96,23 @@ function createConnector(options = {}) {
             catch (err) { caught = err; failed = true; }
           }
           if (failed) { await destroy(); throw failure('query_failed', caught); }
-          return result?.rows;
+          if (id === 'probe_42809') return Object.freeze(expected ? { expectedSqlstate: '42809' } : { probeFailed: true });
+          /** @type {unknown} */ let rows;
+          try {
+            const descriptor = result && typeof result === 'object' ? Object.getOwnPropertyDescriptor(result, 'rows') : undefined;
+            if (!descriptor || !Object.hasOwn(descriptor, 'value')) throw null;
+            rows = descriptor.value;
+          } catch { await destroy(); throw failure('query_failed'); }
+          const identity = id === 'identity' ? mapIdentity(rows, role) : null;
+          if ((id === 'identity' && (!identity || identity.pid !== client.processID)) ||
+            (id === 'role_attrs' && !mapRoleAttrs(rows))) { await destroy(); throw failure('identity_invalid'); }
+          return rows;
         });
         tail = next.catch(() => undefined);
         return next;
       }
-      const identity = mapIdentity(await query('identity'), role);
-      const attrs = mapRoleAttrs(await query('role_attrs'));
-      if (!identity || !attrs || (client.processID !== undefined && client.processID !== identity.pid)) throw failure('identity_invalid');
-      return Object.freeze({ query, pid: identity.pid,
+      if (!Number.isSafeInteger(client.processID) || /** @type {number} */ (client.processID) <= 0) throw failure('identity_invalid');
+      return Object.freeze({ query, pid: /** @type {number} */ (client.processID),
         end: async () => { await tail; if (closed) return; closed = true;
           try { await client.end(); } catch (err) { throw failure('end_failed', err); } finally { release(); } },
         destroy: async () => { await tail; await destroy(); } });

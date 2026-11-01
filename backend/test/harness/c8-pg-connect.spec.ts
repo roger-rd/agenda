@@ -63,18 +63,22 @@ describe('C8 conector solo con pg falso inyectado', () => {
     expect(f.calls.at(-1)?.sql).toBe(SYSTEM.rollback); expect(f.instances[0].destroyed).toBe(true);
     expect(f.calls.map(c => c.sql)).not.toContain('COMMIT');
   });
-  it('sonda 42809 usa savepoint, rollback a sonda y rollback exterior, luego destruye', async () => {
+  it('sonda 42809 usa savepoint, rollback a sonda y rollback exterior, conserva cliente y reserva', async () => {
     const f = pgFake(); const c = await createConnector({ pgModule: f.pgModule }).connect('app', credentials('app'));
     f.calls.length = 0;
-    await expect(c.query('probe_42809', ['agenda_test_app'])).rejects.toEqual({ code: 'query_failed', sqlstate: '42809' });
-    expect(f.calls.map(c => c.sql)).toEqual([SYSTEM.begin, SYSTEM.savepoint, lookup('probe_42809').sql, SYSTEM.rollbackProbe, SYSTEM.rollback]);
-    expect(f.instances[0].destroyed).toBe(true);
+    const marker = await c.query('probe_42809', ['agenda_test_app']);
+    expect(marker).toEqual({ expectedSqlstate: '42809' }); expect(Object.isFrozen(marker)).toBe(true);
+    expect(f.calls.map(c => c.sql)).toEqual([SYSTEM.begin, SYSTEM.savepoint, lookup('probe_42809').sql, SYSTEM.rollbackProbe, SYSTEM.releaseProbe, SYSTEM.rollback]);
+    expect(f.instances[0].destroyed).toBe(false);
+    await expect(createConnector({ pgModule: f.pgModule }).connect('app', credentials('app'))).rejects.toEqual({ code: 'budget_exceeded' });
+    await expect(c.query('server')).resolves.toBeDefined(); await c.end();
   });
   it.each(['identity', 'role_attrs'])('identidad/poderes inválidos en %s destruyen conexión', async id => {
     const f = pgFake();
     if (id === 'identity') f.set(id, [{ ...identity('owner'), recovery: true }]);
     else f.set(id, roleAttrs().map(r => ({ ...r, rolsuper: true })));
-    await expect(createConnector({ pgModule: f.pgModule }).connect('owner', credentials('owner'))).rejects.toEqual({ code: 'identity_invalid' });
+    const c = await createConnector({ pgModule: f.pgModule }).connect('owner', credentials('owner'));
+    await expect(c.query(id)).rejects.toEqual({ code: 'identity_invalid' }); await c.end();
     expect(f.instances[0].destroyed).toBe(true);
   });
   it('fallo de conexión no expone secretos y libera reserva', async () => {
@@ -129,8 +133,8 @@ describe('C8 conector solo con pg falso inyectado', () => {
 describe('C8 identidad de transporte', () => {
   it('processID distinto de identity.pid rechaza y destruye', async () => {
     const f = pgFake(); f.set('identity', [identity('owner', 999)]);
-    await expect(createConnector({ pgModule: f.pgModule }).connect('owner', credentials('owner')))
-      .rejects.toEqual({ code: 'identity_invalid' });
+    const c = await createConnector({ pgModule: f.pgModule }).connect('owner', credentials('owner'));
+    await expect(c.query('identity')).rejects.toEqual({ code: 'identity_invalid' }); await c.end();
     expect(f.instances).toHaveLength(1); expect(f.instances[0].processID).not.toBe(999);
     expect(f.instances[0].destroyed).toBe(true);
     expect(f.calls.at(-1)?.sql).toBe(SYSTEM.rollback);
@@ -150,5 +154,67 @@ describe('C8 identidad de transporte', () => {
       }
     // Config-from-TARGET is equivalent to validated target data: validate() requires exact own values.
     // The existing config/invalid-target tests assert both the emitted constants and pre-construction rejection.
+  });
+});
+
+describe('C8 límites estrictos y recuperación de la sonda', () => {
+  it.each(['owner', 'app'] as const)('presupuesto acumulado %s no se reinicia tras 42809', async role => {
+    const f = pgFake(); const c = await createConnector({ pgModule: f.pgModule }).connect(role, credentials(role));
+    const limit = role === 'owner' ? 30 : 10;
+    await c.query('probe_42809', ['agenda_test_app']);
+    for (let i = 1; i < limit; i++) await c.query('server');
+    const before = f.calls.length;
+    await expect(c.query('server')).rejects.toEqual({ code: 'budget_exceeded' });
+    expect(f.calls).toHaveLength(before); expect(f.instances[0].destroyed).toBe(true); await c.end();
+  });
+  it.each(['42501', '42809\n', 'XX000', ''])('SQLSTATE inesperado %s destruye sin mensajes', async state => {
+    const f = pgFake(); f.fail('probe_42809', state);
+    const c = await createConnector({ pgModule: f.pgModule }).connect('app', credentials('app'));
+    await expect(c.query('probe_42809', ['agenda_test_app'])).rejects.toHaveProperty('code', 'query_failed');
+    expect(f.instances[0].destroyed).toBe(true); await c.end();
+  });
+  it.each(['rollbackProbe', 'releaseProbe', 'rollback'] as const)('fallo de recuperación %s cierra', async key => {
+    const f = pgFake(); f.errors.set(SYSTEM[key], { code: '42501', message: PASSWORD });
+    const c = await createConnector({ pgModule: f.pgModule }).connect('app', credentials('app'));
+    await expect(c.query('probe_42809', ['agenda_test_app'])).rejects.toEqual({ code: 'query_failed', sqlstate: '42501' });
+    expect(f.instances[0].destroyed).toBe(true); await c.end();
+  });
+  it('sonda con éxito devuelve fallo congelado', async () => {
+    const f = pgFake(); f.set('probe_42809', [{ message: PASSWORD }]);
+    const c = await createConnector({ pgModule: f.pgModule }).connect('app', credentials('app'));
+    try { const result = await c.query('probe_42809', ['agenda_test_app']); expect(result).toEqual({ probeFailed: true }); expect(Object.isFrozen(result)).toBe(true); }
+    finally { await c.end(); }
+  });
+  it('42809 fuera de la sonda destruye', async () => {
+    const f = pgFake(); f.fail('default_acl_global', '42809');
+    const c = await createConnector({ pgModule: f.pgModule }).connect('owner', credentials('owner'));
+    await expect(c.query('default_acl_global')).rejects.toEqual({ code: 'query_failed', sqlstate: '42809' });
+    expect(f.instances[0].destroyed).toBe(true); await c.end();
+  });
+});
+
+describe('C8 corrección: processID inválido al conectar', () => {
+  it.each([undefined, 0, -1, NaN, '100', 100.5])('processID %# rechaza, cierra fake y libera presupuesto', async processID => {
+    const f = pgFake();
+    class InvalidPidClient extends f.pgModule.Client {
+      constructor(config: Record<string, unknown>) {
+        super(config);
+        if (processID === undefined) Reflect.deleteProperty(this, 'processID');
+        else Object.defineProperty(this, 'processID', { value: processID, writable: true, configurable: true });
+      }
+    }
+    const connector = createConnector({ pgModule: { Client: InvalidPidClient } });
+    const attempt = connector.connect('owner', credentials('owner'));
+    try {
+      await expect(attempt).rejects.toEqual({ code: 'identity_invalid' });
+      expect(f.instances).toHaveLength(1); expect(f.instances[0].destroyed || f.instances[0].ended).toBe(true);
+      expect(f.calls).toEqual([]);
+      // A distinct connector shares the global owner reservation. Success proves release.
+      const next = await createConnector({ pgModule: f.pgModule }).connect('owner', credentials('owner'));
+      try { expect(next.pid).toBe(101); } finally { await next.end(); }
+    } finally {
+      // A surviving mutant may return a client; still release its fake reservation.
+      await attempt.then(c => c.end(), () => undefined);
+    }
   });
 });

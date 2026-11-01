@@ -46,6 +46,85 @@ function mapServer(input) {
     statementTimeout: r.statement_timeout, lockTimeout: r.lock_timeout,
     idleInTransactionTimeout: r.idle_in_transaction_session_timeout, idleSessionTimeout: r.idle_session_timeout, searchPath: r.search_path });
 }
+/** Strict inet parser without network APIs (static guards prohibit node:net).
+ * IPv4-mapped IPv6 uses the embedded IPv4 classification; zones are not inet.
+ * @param {unknown} value */
+function addressClass(value) {
+  if (value === null) return 'null';
+  if (typeof value !== 'string') return 'invalid';
+  const parts = value.split('/');
+  if (parts.length > 2 || (parts.length === 2 && !/^(0|[1-9][0-9]*)$(?![\s\S])/.test(parts[1]))) return 'invalid';
+  const ip = parts[0]; const mask = parts.length === 2 ? Number(parts[1]) : undefined;
+  /** @param {string} text @returns {number[]|null} */
+  const ipv4 = text => {
+    const octets = text.split('.');
+    return octets.length === 4 && octets.every(x => /^(0|[1-9][0-9]{0,2})$(?![\s\S])/.test(x) && Number(x) <= 255) ? octets.map(Number) : null;
+  };
+  /** @param {number[]} bytes */
+  const v4class = bytes => {
+    const [a, b] = bytes;
+    if (a === 127) return 'loopback';
+    if (a === 169 && b === 254) return 'linklocal';
+    if (a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127)) return 'private';
+    return 'public';
+  };
+  if (!ip.includes(':')) {
+    const bytes = ipv4(ip);
+    return bytes && (mask === undefined || mask <= 32) ? v4class(bytes) : 'invalid';
+  }
+  if (mask !== undefined && mask > 128) return 'invalid';
+  let expanded = ip;
+  if (ip.includes('.')) {
+    const last = ip.lastIndexOf(':'); const bytes = ipv4(ip.slice(last + 1));
+    if (!bytes) return 'invalid';
+    expanded = ip.slice(0, last + 1) + ((bytes[0] << 8) | bytes[1]).toString(16) + ':' + ((bytes[2] << 8) | bytes[3]).toString(16);
+  }
+  const halves = expanded.split('::');
+  if (halves.length > 2) return 'invalid';
+  const left = halves[0] ? halves[0].split(':') : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  if (![...left, ...right].every(x => /^[0-9a-fA-F]{1,4}$(?![\s\S])/.test(x)) ||
+    (halves.length === 1 ? left.length !== 8 : left.length + right.length >= 8)) return 'invalid';
+  const words = [...left.map(x => parseInt(x, 16)), ...Array(8 - left.length - right.length).fill(0), ...right.map(x => parseInt(x, 16))];
+  if (words.slice(0, 5).every(x => x === 0) && words[5] === 65535) return v4class([words[6] >> 8, words[6] & 255, words[7] >> 8, words[7] & 255]);
+  if (words.slice(0, 7).every(x => x === 0) && words[7] === 1) return 'loopback';
+  if ((words[0] & 0xfe00) === 0xfc00) return 'private';
+  if ((words[0] & 0xffc0) === 0xfe80) return 'linklocal';
+  return 'public';
+}
+/** @param {unknown} value */
+function epoch(value) {
+  if (typeof value === 'string' && /^-?[0-9]+(?:\.[0-9]+)?$(?![\s\S])/.test(value)) value = Number(value);
+  return typeof value === 'number' && Number.isFinite(value) && Number.isFinite(new Date(value * 1000).getTime()) ? value : null;
+}
+/** NULL address is a valid Unix-socket observation, not missing evidence.
+ * Malformed version/epochs are unknown; a well-formed non-16 version contradicts.
+ * @param {unknown} input */
+function mapIdentityEvidence(input) {
+  const r = single(input); if (!r) return null;
+  const version = typeof r.version_text === 'string' ? /^PostgreSQL ([1-9][0-9]*)\.([0-9]+) /.exec(r.version_text) : null;
+  const start = epoch(r.postmaster_epoch); const now = epoch(r.server_now_epoch);
+  if (!version || !Number.isSafeInteger(Number(version[1])) || !Number.isSafeInteger(Number(version[2])) ||
+    start === null || now === null || !Object.hasOwn(r, 'server_addr') || r.server_addr === undefined) return null;
+  return Object.freeze({ major: Number(version[1]), minor: Number(version[2]), addrClass: addressClass(r.server_addr),
+    postmasterStartEpoch: start, serverNowEpoch: now, postmasterStartUtc: new Date(start * 1000).toISOString(), uptimeSeconds: now - start });
+}
+/** Complementary only: later internal restart and uptime do not gate.
+ * @param {unknown} evidence @param {number} [containerStartEpoch] */
+function evaluateIdentityEvidence(evidence, containerStartEpoch) {
+  const e = single([evidence]);
+  if (!e || count(e.major) === null || count(e.minor) === null || typeof e.addrClass !== 'string' ||
+    !['private', 'loopback', 'linklocal', 'null', 'public', 'invalid'].includes(e.addrClass) ||
+    typeof e.postmasterStartEpoch !== 'number' || epoch(e.postmasterStartEpoch) === null ||
+    typeof e.serverNowEpoch !== 'number' || epoch(e.serverNowEpoch) === null ||
+    e.postmasterStartUtc !== new Date(e.postmasterStartEpoch * 1000).toISOString() ||
+    e.uptimeSeconds !== e.serverNowEpoch - e.postmasterStartEpoch ||
+    (containerStartEpoch !== undefined && epoch(containerStartEpoch) === null)) return Object.freeze({ ok: false, code: 'identity_unknown', exitCode: 3 });
+  const contradicted = e.major !== 16 || e.postmasterStartEpoch > e.serverNowEpoch ||
+    ['public', 'invalid'].includes(e.addrClass) ||
+    (containerStartEpoch !== undefined && e.postmasterStartEpoch < containerStartEpoch - 5);
+  return Object.freeze({ ok: !contradicted, code: contradicted ? 'identity_contradicted' : 'ok', exitCode: contradicted ? 3 : 0 });
+}
 // C0 S1: session startup parameters override these role defaults.
 // Exact app-only allowlist; no normalization, duplicate entries or other settings.
 const APP_ROLE_CONFIG = Object.freeze(['statement_timeout=30s', 'lock_timeout=5s',
@@ -246,6 +325,6 @@ async function collectPrivileges(run, name) {
 }
 /** @param {Run} run @param {{databaseOid:number,expectedPid?:number,child?:boolean,ownPid?:number}} options */
 async function collectL0(run, options) { return observeL0(await run('advisory_holders', [L0_KEY]), options); }
-module.exports = Object.freeze({ L0_KEY, EMPTY_FIELDS, EXPECTED, mapIdentity, mapServer, mapRoleAttrs, mapSchemas,
+module.exports = Object.freeze({ L0_KEY, EMPTY_FIELDS, EXPECTED, mapIdentityEvidence, evaluateIdentityEvidence, mapIdentity, mapServer, mapRoleAttrs, mapSchemas,
   mapPrivileges, mapRoles, mapDefaultAclSchema, mapGlobalDefaultAcl, mapSessions, mapBaseline,
   mapNumbackends, mapRelationLocks, observeL0, classifyPgError, collectIdentity, collectPrivileges, collectL0 });

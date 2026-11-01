@@ -8,7 +8,7 @@ describe('C8 PostgreSQL catálogo cerrado', () => {
     expect(lookup('role_membership').sql).toBe(QUERY_CONTRACT.roles);
     expect(lookup('default_acl_schema').sql).toBe(QUERY_CONTRACT.defaultsQuery);
     expect(lookup('default_acl_global').sql).toBe(QUERY_CONTRACT.globalDefaultsQuery);
-    expect(CATALOG).toHaveLength(23); expect(new Set(CATALOG.map(q => q.id)).size).toBe(23);
+    expect(CATALOG).toHaveLength(24); expect(new Set(CATALOG.map(q => q.id)).size).toBe(24);
     expect(Object.isFrozen(CATALOG)).toBe(true);
     expect(SYSTEM).toEqual({ begin: 'BEGIN READ ONLY', rollback: 'ROLLBACK', savepoint: 'SAVEPOINT c8_probe', rollbackProbe: 'ROLLBACK TO SAVEPOINT c8_probe', releaseProbe: 'RELEASE SAVEPOINT c8_probe' });
   });
@@ -87,3 +87,10 @@ describe('C8 SQL límites y procesos de fondo', () => {
     expect(() => assertAllowed(sql, [42, names])).toThrow('query_params');
   });
 });
+
+ it('identity_evidence es Nivel A para ambos roles y no introduce literales SQL', () => {
+   const q = getQuery('identity_evidence');
+   expect(q.level).toBe('A'); expect(q.roles).toEqual(['owner', 'app']); expect(q.paramTypes).toEqual([]);
+   expect(q.sql).toBe('SELECT pg_catalog.version() AS version_text, pg_catalog.inet_server_addr()::text AS server_addr, EXTRACT(EPOCH FROM pg_catalog.pg_postmaster_start_time())::text AS postmaster_epoch, EXTRACT(EPOCH FROM pg_catalog.now())::text AS server_now_epoch');
+   expect(q.sql).not.toContain("'");
+ });

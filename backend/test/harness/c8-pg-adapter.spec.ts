@@ -1,11 +1,11 @@
-import { mapIdentity, mapServer, mapRoleAttrs, mapSchemas, mapPrivileges, mapRoles, mapDefaultAclSchema,
+import { mapIdentityEvidence, evaluateIdentityEvidence, mapIdentity, mapServer, mapRoleAttrs, mapSchemas, mapPrivileges, mapRoles, mapDefaultAclSchema,
   mapGlobalDefaultAcl, mapSessions, mapBaseline, mapNumbackends, mapRelationLocks, observeL0, classifyPgError,
   collectIdentity, collectPrivileges, collectL0, L0_KEY, EMPTY_FIELDS } from '../../scripts/harness/c8-pg-adapter.cjs';
 import { evaluate, evaluateGlobalDefaultAcl, recognized } from '../../scripts/harness/c8-gate.cjs';
 import { authorization } from '../../scripts/harness/c8-preflight.cjs';
 import { decide } from '../../scripts/harness/c8-sweep-policy.cjs';
 import { schema } from './support/c8-fakes';
-import { NAME, NOW, identity, server, roleAttrs, effective, coverage, empty, holder, seeded } from './support/c8-pg-fakes';
+import { NAME, NOW, identityEvidence, identity, server, roleAttrs, effective, coverage, empty, holder, seeded } from './support/c8-pg-fakes';
 const roles = { evaluable: true, membership: false, setMembership: false };
 describe('C8 mappers puros', () => {
   it('identidad, servidor PG16 y roles sin poderes', () => {
@@ -253,4 +253,75 @@ describe('C8 regresiones D1/D2 y cobertura adversarial', () => {
     expect(mapSessions([row])).toEqual({ otherRolePids: [100], runSessions: 1 });
     expect(mapSessions([{ ...row, ...override }])).toEqual({ otherRolePids: null, runSessions: null });
   });
+});
+
+describe('C8 evidencia complementaria de identidad', () => {
+  it.each([
+    ['10.0.0.1', 'private'], ['172.16.0.1/12', 'private'], ['172.31.255.255', 'private'],
+    ['192.168.0.1', 'private'], ['100.64.0.1', 'private'], ['100.127.255.255/32', 'private'],
+    ['127.255.0.1/8', 'loopback'], ['169.254.0.1', 'linklocal'], ['fc00::1', 'private'],
+    ['fdff:ffff::1/128', 'private'], ['::1', 'loopback'], ['0:0:0:0:0:0:0:1/128', 'loopback'],
+    ['fe80::1/64', 'linklocal'], ['febf::1', 'linklocal'], ['::ffff:10.1.2.3', 'private'],
+    ['::ffff:7f00:1', 'loopback'], [null, 'null'], ['8.8.8.8', 'public'], ['172.15.0.1', 'public'],
+    ['172.32.0.1', 'public'], ['100.63.0.1', 'public'], ['100.128.0.1', 'public'],
+    ['2001:db8::1', 'public'], ['::', 'public'], ['fec0::1', 'public'], ['fbff::1', 'public'],
+    ['::ffff:8.8.8.8', 'public'], ['', 'invalid'], ['1.2.3', 'invalid'], ['256.1.2.3', 'invalid'],
+    ['01.2.3.4', 'invalid'], ['10.0.0.1/33', 'invalid'], ['10.0.0.1/-1', 'invalid'],
+    ['10.0.0.1/01', 'invalid'], ['10.0.0.1/8/8', 'invalid'], ['::1/129', 'invalid'],
+    ['fe80::1%eth0', 'invalid'], [':::1', 'invalid'], ['1::2::3', 'invalid'],
+    ['1:2:3:4:5:6:7', 'invalid'], ['1:2:3:4:5:6:7:8:9', 'invalid'], ['::gg', 'invalid'],
+    ['10.0.0.1\n', 'invalid'], ['::1\n', 'invalid'], ['::ffff:999.1.2.3', 'invalid'],
+  ])('inet %# se clasifica sin conexión', (server_addr, expected) => {
+    const evidence = mapIdentityEvidence([{ ...identityEvidence(), server_addr }]);
+    expect(evidence?.addrClass).toBe(expected);
+    expect(evaluateIdentityEvidence(evidence).code).toBe(['public', 'invalid'].includes(expected!) ? 'identity_contradicted' : 'ok');
+  });
+  it.each(['version_text', 'postmaster_epoch', 'server_now_epoch'])('%s desconocido falla cerrado', key => {
+    for (const value of [null, undefined, '', 'Error: SELECT secret', NaN, Infinity, {}, '1e3', ' 1', '1\n']) {
+      expect(evaluateIdentityEvidence(mapIdentityEvidence([{ ...identityEvidence(), [key]: value }]))).toEqual({ ok: false, code: 'identity_unknown', exitCode: 3 });
+    }
+  });
+  it.each([undefined, [], null, [{}], [identityEvidence(), identityEvidence()]].map(input => ({ input })))('forma desconocida %#', ({ input }) => {
+    expect(evaluateIdentityEvidence(mapIdentityEvidence(input)).code).toBe('identity_unknown');
+  });
+  it.each(['PostgreSQL 15.9 on fake', 'PostgreSQL 17.0 on fake'])('versión contradictoria %s', version_text => {
+    expect(evaluateIdentityEvidence(mapIdentityEvidence([{ ...identityEvidence(), version_text }])).code).toBe('identity_contradicted');
+  });
+  it('major/minor, uptime y tolerancia sin coincidencia temporal rígida', () => {
+    const e = mapIdentityEvidence([identityEvidence()])!;
+    expect(e).toMatchObject({ major: 16, minor: 4, uptimeSeconds: 3600 });
+    for (const start of [undefined, e.postmasterStartEpoch - 100000, e.postmasterStartEpoch, e.postmasterStartEpoch + 5]) {
+      expect(evaluateIdentityEvidence(e, start)).toEqual({ ok: true, code: 'ok', exitCode: 0 });
+    }
+    expect(evaluateIdentityEvidence(e, e.postmasterStartEpoch + 5.001).code).toBe('identity_contradicted');
+    expect(evaluateIdentityEvidence(e, NaN).code).toBe('identity_unknown');
+    expect(evaluateIdentityEvidence(mapIdentityEvidence([{ ...identityEvidence(), postmaster_epoch: String(NOW / 1000 + 1) }])).code).toBe('identity_contradicted');
+  });
+  it('propiedad IPv4 con semilla fija, prefijos privados y máscaras', () => {
+    const next = seeded(82102);
+    for (let i = 0; i < 150; i++) {
+      const server_addr = `10.${next() % 256}.${next() % 256}.${next() % 256}/${next() % 33}`;
+      expect(mapIdentityEvidence([{ ...identityEvidence(), server_addr }])?.addrClass).toBe('private');
+    }
+  });
+  it('getters y campos ausentes no son evidencia', () => {
+    const get = jest.fn(() => 'secret');
+    expect(mapIdentityEvidence([Object.defineProperty(identityEvidence(), 'version_text', { get })])).toBeNull();
+    const { server_addr: _address, ...row } = identityEvidence(); void _address;
+    expect(mapIdentityEvidence([row])).toBeNull(); expect(get).not.toHaveBeenCalled();
+  });
+});
+
+it.each([{}, { major: 16 }, { addrClass: 'private' }, null, undefined])('evaluador no acepta evidencia fabricada incompleta %#', value => {
+  expect(evaluateIdentityEvidence(value)).toEqual({ ok: false, code: 'identity_unknown', exitCode: 3 });
+});
+it('versión no canónica no pasa como PG16', () => {
+  expect(evaluateIdentityEvidence(mapIdentityEvidence([{ ...identityEvidence(), version_text: 'PostgreSQL 016.4 on fake' }])).ok).toBe(false);
+});
+
+it.each([-1, 1, 0.25])('uptime manipulado por %s invalida evidencia completa', delta => {
+  const evidence = mapIdentityEvidence([identityEvidence()])!;
+  expect(evaluateIdentityEvidence(evidence)).toEqual({ ok: true, code: 'ok', exitCode: 0 });
+  expect(evaluateIdentityEvidence({ ...evidence, uptimeSeconds: evidence.uptimeSeconds + delta }))
+    .toEqual({ ok: false, code: 'identity_unknown', exitCode: 3 });
 });
