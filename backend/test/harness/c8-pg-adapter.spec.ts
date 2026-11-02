@@ -221,11 +221,10 @@ describe('C8 regresiones D1/D2 y cobertura adversarial', () => {
     expect(p.objects.some(o => kind === 'column' ? o.column : o.direct)).toBe(true);
     expect(evaluate([schema()], () => p, 'P6b', roles)).toEqual({ ok: false, code: 'gate_residual', exitCode: 2 });
   });
-  it('defaultAcl de esquema se propaga y cierra la puerta con su código actual', () => {
+  it('defaultAcl de esquema se propaga y la puerta lo clasifica como residual', () => {
     const p = mapPrivileges(effective(), coverage(), [{ oid: 99 }]);
     expect(p.defaultAcl).toBe(true); expect(p.complete).toBe(true); expect(p.evaluable).toBe(true);
-    // comportamiento actual; el código gate_residual requiere cambio autorizado de evaluate() en 8.6
-    expect(evaluate([schema()], () => p, 'P6b', roles)).toEqual({ ok: false, code: 'gate_unknown', exitCode: 2 });
+    expect(evaluate([schema()], () => p, 'P6b', roles)).toEqual({ ok: false, code: 'gate_residual', exitCode: 2 });
   });
   it('dos oids de esquema completos no constituyen cobertura aunque uno coincida', () => {
     const r = effective();

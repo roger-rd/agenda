@@ -73,14 +73,21 @@ function writable(schema, runId) { return recognized(schema) && parseMark(schema
  * @param {'P6a'|'P6b'|'P6c'} phase
  * @param {{evaluable:boolean,membership:boolean,setMembership:boolean}} roles */
 function evaluate(schemas, inspect, phase, roles) {
-  if (!['P6a', 'P6b', 'P6c'].includes(phase)) return Object.freeze({ ok: false, code: 'gate_unknown', exitCode: 2 });
+  const unknown = Object.freeze({ ok: false, code: 'gate_unknown', exitCode: 2 });
+  const residual = Object.freeze({ ok: false, code: 'gate_residual', exitCode: 2 });
+  if (!['P6a', 'P6b', 'P6c'].includes(phase)) return unknown;
   try {
-    if (roles.evaluable !== true || roles.membership !== false || roles.setMembership !== false) throw new Error('gate_unknown');
+    // unknown = evidence missing or malformed; residual = evidence evaluated and a privilege or
+    // membership is present. Both close with exit 2, but they are different facts.
+    if (roles.evaluable !== true || typeof roles.membership !== 'boolean' || typeof roles.setMembership !== 'boolean') return unknown;
+    if (roles.membership || roles.setMembership) return residual;
     for (const schema of schemas.filter(recognized)) {
       const p = inspect(schema);
       if (p.complete !== true || p.evaluable !== true || !Array.isArray(p.objects) ||
         !p.objects.some(o => o.kind === 'schema')) throw new Error('gate_unknown');
-      if ([p.membership, p.setMembership, p.grantable, p.defaultAcl].some(v => v !== false)) throw new Error('gate_residual');
+      const structure = [p.membership, p.setMembership, p.grantable, p.defaultAcl];
+      if (structure.some(v => typeof v !== 'boolean')) throw new Error('gate_unknown');
+      if (structure.some(v => v)) return residual;
       for (const object of p.objects) {
         if (object.evaluable !== true || !['schema', 'table', 'view', 'sequence', 'function', 'procedure'].includes(object.kind)) throw new Error('gate_unknown');
         const flags = [object.direct, object.inherited, object.public, object.column];

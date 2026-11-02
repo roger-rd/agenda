@@ -83,3 +83,43 @@ describe('H5 ACL global independiente de efectivos y ACL de esquema', () => {
       entries: [{ ...global.entries[0], ownerRole, granteePublic: false, granteeApp: true }] }).code).toBe('gate_default_acl');
   });
 });
+
+describe('C8 puerta: gate_unknown (evidencia ausente o mal formada) frente a gate_residual (hallazgo evaluado)', () => {
+  const unknown = { ok: false, code: 'gate_unknown', exitCode: 2 };
+  const residual = { ok: false, code: 'gate_residual', exitCode: 2 };
+  const phases = ['P6a', 'P6b', 'P6c'] as const;
+  it.each(['membership', 'setMembership', 'grantable', 'defaultAcl'] as const)('%s verdadero en el esquema es residual en todas las fases', flag => {
+    for (const phase of phases) expect(evaluate([schema()], () => ({ ...privileges(), [flag]: true }), phase, roles)).toEqual(residual);
+  });
+  it.each(['membership', 'setMembership'] as const)('%s verdadero en roles es residual y no inspecciona esquemas', flag => {
+    const inspect = jest.fn(privileges);
+    for (const phase of phases) expect(evaluate([schema()], inspect, phase, { ...roles, [flag]: true })).toEqual(residual);
+    expect(inspect).not.toHaveBeenCalled();
+  });
+  it.each(['membership', 'setMembership', 'grantable', 'defaultAcl'] as const)('%s no booleano en el esquema es desconocido', flag => {
+    for (const bad of [undefined, null, 'false', 0, 1, {}]) {
+      expect(evaluate([schema()], () => ({ ...privileges(), [flag]: bad }), 'P6b', roles)).toEqual(unknown);
+    }
+  });
+  it.each(['membership', 'setMembership'] as const)('%s no booleano en roles es desconocido', flag => {
+    for (const bad of [undefined, null, 'false', 0, 1, {}]) {
+      expect(evaluate([schema()], privileges, 'P6b', { ...roles, [flag]: bad } as never)).toEqual(unknown);
+    }
+  });
+  it('roles no evaluables, fase inválida, esquema incompleto o inspección que lanza son desconocidos', () => {
+    expect(evaluate([schema()], privileges, 'P6b', { ...roles, evaluable: false })).toEqual(unknown);
+    expect(evaluate([schema()], privileges, 'P9' as never, roles)).toEqual(unknown);
+    expect(evaluate([schema()], () => ({ ...privileges(), complete: false }), 'P6b', roles)).toEqual(unknown);
+    expect(evaluate([schema()], () => ({ ...privileges(), evaluable: false }), 'P6b', roles)).toEqual(unknown);
+    expect(evaluate([schema()], () => { throw new Error('private details'); }, 'P6b', roles)).toEqual(unknown);
+  });
+  it('un residuo evaluado no se disfraza de desconocido y viceversa: ambos cierran con salida 2 y códigos distintos', () => {
+    const a = evaluate([schema()], () => ({ ...privileges(), defaultAcl: true }), 'P6b', roles);
+    const b = evaluate([schema()], () => ({ ...privileges(), defaultAcl: 'x' as never }), 'P6b', roles);
+    expect([a.exitCode, b.exitCode]).toEqual([2, 2]); expect(a.code).not.toBe(b.code);
+  });
+  it('los resultados están congelados', () => {
+    expect(Object.isFrozen(evaluate([schema()], () => ({ ...privileges(), grantable: true }), 'P6b', roles))).toBe(true);
+    expect(Object.isFrozen(evaluate([schema()], privileges, 'P9' as never, roles))).toBe(true);
+  });
+});

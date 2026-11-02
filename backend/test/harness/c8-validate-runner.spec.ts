@@ -95,9 +95,8 @@ describe('C8 runner regresiones de cortes y evidencias', () => {
     x.f.set('schemas', [schema()]); x.f.set('effective', r); x.f.set('effective_coverage', coverage());
     expect(await main(authorized, x.deps)).toBe(2);
     expect(x.stdout).toHaveBeenCalledTimes(1);
-    // grantable, como defaultAcl, actualmente cae en gate_unknown; evaluate() no se modifica.
     const summary = JSON.parse(x.stdout.mock.calls[0][0].slice('AGENDA_C8_VALIDATE '.length));
-    expect(summary).toMatchObject({ status: 'failed', code: kind === 'grantable' ? 'gate_unknown' : 'gate_residual', checks: expect.any(Number) });
+    expect(summary).toMatchObject({ status: 'failed', code: 'gate_residual', checks: expect.any(Number) });
     expect(Number.isSafeInteger(summary.checks)).toBe(true);
     expect(x.stdout.mock.calls[0][0]).not.toContain(PASSWORD);
     expect(x.stdout.mock.calls[0][0]).not.toContain(schema().name);
