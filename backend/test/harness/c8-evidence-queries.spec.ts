@@ -10,7 +10,8 @@ const ids = ['ev_context', 'ev_namespace', 'ev_relations', 'ev_routines', 'ev_ty
   'ev_namespace_catalog_counts', 'ev_companions', 'ev_closure', 'ev_external_dependents',
   'ev_extension_members', 'ev_event_triggers', 'ev_role_membership', 'ev_default_acl_schema',
   'ev_default_acl_global', 'ev_outside_census', 'ev_sessions', 'ev_target_relation_locks',
-  'ev_advisory_holders', 'ev_prepared_xacts'];
+  'ev_advisory_holders', 'ev_prepared_xacts',
+  'ev_outbound_references', 'ev_companion_items', 'ev_internal_edges'];
 const params: Record<string, unknown> = { schema: NAME, key: '4095698742242691401', app: 'agenda_test_app' };
 const source = fs.readFileSync(path.resolve(__dirname, '../../scripts/harness/c8-evidence-queries.cjs'), 'utf8');
 const input = (q: typeof CATALOG[number]) => Object.fromEntries(q.params.map(t => [t, params[t]]));
@@ -24,13 +25,13 @@ const INVALID = { ok: false, truncated: false, code: 'evidence_query_invalid', s
 const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
 
 describe('C8 evidence: catálogo cerrado offline', () => {
-  it('fija exactamente 19 ids y congela metadatos y vocabularios', () => {
+  it('fija exactamente 22 ids y congela metadatos y vocabularios', () => {
     const evidence = jest.requireActual<typeof import('../../scripts/harness/c8-evidence-queries.cjs')>('../../scripts/harness/c8-evidence-queries.cjs');
     expect(Object.isFrozen(evidence)).toBe(true);
     expect(Object.keys(evidence).sort()).toEqual(['CATALOG', 'LIMITATIONS', 'PENDING', 'LITERALS',
       'ALLOWED_FUNCTIONS', 'ALLOWED_RELATIONS', 'get', 'build', 'validateSql', 'auditSql', 'checkRows'].sort());
-    expect(CATALOG.map(q => q.id)).toEqual(ids); expect(CATALOG).toHaveLength(19);
-    expect(new Set(CATALOG.map(q => q.id)).size).toBe(19);
+    expect(CATALOG.map(q => q.id)).toEqual(ids); expect(CATALOG).toHaveLength(22);
+    expect(new Set(CATALOG.map(q => q.id)).size).toBe(22);
     for (const v of [CATALOG, LIMITATIONS, PENDING, LITERALS, ALLOWED_FUNCTIONS, ALLOWED_RELATIONS]) expect(Object.isFrozen(v)).toBe(true);
     for (const q of CATALOG) {
       for (const v of [q, q.params, q.columns, q.limits, q.cardinality, q.incompleteWhen, ...q.columns, ...q.incompleteWhen,
@@ -307,7 +308,8 @@ describe('descriptores y prototipos con claves propias válidas', () => {
   });
 });
 
-const DIGESTS: Record<string, string> = {
+/** Huellas del commit C2 (79571fc), antes de C2.x: solo dos cambian y tres consultas se añaden. */
+const DIGESTS_C2: Record<string, string> = {
   ev_context: '1e75233fc91705188f7a38893ad432c65c04ddf2f8a81bec3f183009962fbc6a',
   ev_namespace: '10b1ad773b716e94ce8eed6357b0acbea33b5a0e176eb9ef5f2c18658a3e8db7',
   ev_relations: 'c7030dd955267ff7bc25989461991a87250696582f0454fca61e750337d392e7',
@@ -327,6 +329,30 @@ const DIGESTS: Record<string, string> = {
   ev_target_relation_locks: '0985bc2b3111e0f0115b484c3c33d49d00ae1ed140f0e16acf09108d49ed7a3c',
   ev_advisory_holders: '9f54dac3f55cc778e0da295c273e23ef3e1012f57bd95c96d812ae344d5fe1c4',
   ev_prepared_xacts: '19f45520fcf502b330cd6ccf9246cbeff940de8343ce12287ea89dce41aa1a26',
+};
+const DIGESTS: Record<string, string> = {
+  ev_context: '1e75233fc91705188f7a38893ad432c65c04ddf2f8a81bec3f183009962fbc6a',
+  ev_namespace: '10b1ad773b716e94ce8eed6357b0acbea33b5a0e176eb9ef5f2c18658a3e8db7',
+  ev_relations: 'c7030dd955267ff7bc25989461991a87250696582f0454fca61e750337d392e7',
+  ev_routines: 'df1496cb040d4169a4d168cf4a5b51b38a32a89d5d23f92d3989ab7304195716',
+  ev_types: '4a8f460d23eb16be0e9495259962b54f73db0b5dd27adf3f7ab439d2b8d48de3',
+  ev_namespace_catalog_counts: 'dde8d36c90e27dc3ee4f459a6bdd78e993160ebb6fbfefbc2509665e55803014',
+  ev_companions: '75c67807a5de6b6042de7ec46c3612fd52badf82e2542731693562df0f4e2612',
+  ev_closure: 'fea30caa2dfa087d4ec07761d324cc1e5c8498a0697e2338a06ec82ca56ab4c9',
+  ev_external_dependents: '907d266d9a95a753e5e878f0c9528761db1a65572b7016a88ce1e184a7855dcb',
+  ev_extension_members: 'c0c5d41697c7514f246352ffacb861dd3c6a5fbaac132f34990ad4a73ff255ba',
+  ev_event_triggers: '7b5ac81c4a9c0e3b0cceb61d515678daf3524e2eace81271bf0ddf31fc24a6bb',
+  ev_role_membership: 'cd50e9ae7364e593c10eee9f599fd814cf43856bf654d56d9fb6b288bccaac5d',
+  ev_default_acl_schema: '629589df14b53c240b029f763924de81757109efd384d8dddfbb52dfd457ef74',
+  ev_default_acl_global: '88ad3cea66d71a13ab6ead109e15eae2fbefd6c37e8d8d6d6af9f02f50291461',
+  ev_outside_census: '6007b6594445f679bc7df705075b713f9033f9df838faac75daa26afb78797ff',
+  ev_sessions: '3aeaf29935e7f6767e0419de3c2c1228a3304b918319f67f940512f11909405d',
+  ev_target_relation_locks: '0985bc2b3111e0f0115b484c3c33d49d00ae1ed140f0e16acf09108d49ed7a3c',
+  ev_advisory_holders: '9f54dac3f55cc778e0da295c273e23ef3e1012f57bd95c96d812ae344d5fe1c4',
+  ev_prepared_xacts: '19f45520fcf502b330cd6ccf9246cbeff940de8343ce12287ea89dce41aa1a26',
+  ev_outbound_references: 'a0ee78043ef70af8b87d435a584437319e6d1abdf156f2a990acc0a0fcf21e9e',
+  ev_companion_items: '5debce8398b432617b4549143a2c46e1461e2200c39d8cc63fb599fa76cb3e37',
+  ev_internal_edges: 'e61115ac919f95038d882bfe187eac1697bd0db275bdd6d54c63d951941310fa',
 };
 const CENSUS = ['namespace', 'class', 'proc', 'type', 'constraint', 'trigger', 'policy', 'extension', 'event_trigger', 'default_acl'];
 const censusRows = (names: string[]) => names.map(catalog => ({ catalog, n: '1', digest: 'f'.repeat(64) }));
@@ -504,5 +530,198 @@ describe('S1-C/C2 corrección 5: estado de validación en servidor', () => {
   it('documenta que S2-bis debe verificar SQL exacto y resultados antes de tratarlos como evidencia demostrada', () => {
     expect(PENDING.join(' ')).toMatch(/S2-bis must verify the exact SQL text \(sqlSha256\).*result shapes.*before C3 may treat any row as demonstrated evidence.*serverValidated stays false/);
     expect(LIMITATIONS.join(' ')).toMatch(/No query has been validated against a real PostgreSQL server/);
+  });
+});
+
+const NEW_IDS = ['ev_outbound_references', 'ev_companion_items', 'ev_internal_edges'];
+const POLICY_BRANCH = " UNION ALL SELECT 'pg_catalog.pg_policy'::regclass, y.oid, c.relnamespace FROM pg_catalog.pg_policy y JOIN pg_catalog.pg_class c ON c.oid = y.polrelid";
+const sha = (text: string) => jest.requireActual<typeof import('node:crypto')>('node:crypto').createHash('sha256').update(text).digest('hex');
+const outboundRow = (extra: Record<string, unknown> = {}) => ({ source_classid: 'pg_class', source_objid: 10, source_subid: 0, group_classid: 'pg_class',
+  group_oid: 10, deptype: 'n', ref_classid: 'pg_class', ref_objid: 20, ref_subid: 0, target_schema: 'public', ...extra });
+const companionRow = (extra: Record<string, unknown> = {}) => ({ item_kind: 'sequence_owner', item_classid: 'pg_class', item_oid: 30, item_namespace_oid: 2200,
+  group_classid: 'pg_class', group_oid: 10, related_classid: '', related_oid: 0, subtype: 'S', name: 't_id_seq', edge_deptype: 'a', edge_ref_subid: '1',
+  extension_edges: '0', ...extra });
+const internalRow = (extra: Record<string, unknown> = {}) => ({ source_classid: 'pg_constraint', source_objid: 40, source_subid: 0,
+  source_group_classid: 'pg_class', source_group_oid: 10, deptype: 'a', ref_classid: 'pg_class', ref_objid: 10, ref_subid: 1,
+  ref_group_classid: 'pg_class', ref_group_oid: 10, ...extra });
+const builders: Record<string, (extra?: Record<string, unknown>) => Record<string, unknown>> = {
+  ev_outbound_references: outboundRow, ev_companion_items: companionRow, ev_internal_edges: internalRow };
+const incomplete = { ok: false, truncated: false, code: 'evidence_query_incomplete', serverValidated: false };
+
+describe('S1-C/C2.x: catálogo ampliado de 19 a 22 consultas', () => {
+  it('solo cambian las huellas de ev_external_dependents y ev_extension_members; las otras 17 siguen idénticas', () => {
+    expect(Object.keys(DIGESTS)).toHaveLength(22); expect(Object.keys(DIGESTS_C2)).toHaveLength(19);
+    const changed = Object.keys(DIGESTS_C2).filter(id => DIGESTS[id] !== DIGESTS_C2[id]).sort();
+    expect(changed).toEqual(['ev_extension_members', 'ev_external_dependents']);
+    for (const id of NEW_IDS) expect(DIGESTS_C2[id]).toBeUndefined();
+    expect(Object.keys(DIGESTS).filter(id => !(id in DIGESTS_C2))).toEqual(NEW_IDS);
+  });
+  it('la única diferencia SQL de las dos consultas modificadas es la rama de pg_policy', () => {
+    for (const id of ['ev_external_dependents', 'ev_extension_members']) {
+      const q = get(id);
+      expect(q.sql.split(POLICY_BRANCH)).toHaveLength(2);
+      expect(sha(q.sql.replace(POLICY_BRANCH, ''))).toBe(DIGESTS_C2[id]);
+      expect(sha(q.sql)).toBe(DIGESTS[id]); expect(q.sqlSha256).toBe(DIGESTS[id]);
+    }
+    expect(get('ev_external_dependents').limits.join(' ')).toMatch(/attrdef\/policy only/);
+    expect(get('ev_extension_members').limits.join(' ')).toMatch(/policies/);
+  });
+  it('pg_policy figura una vez, con su relación y namespace indirecto, en los mapas de ambas consultas modificadas', () => {
+    for (const id of ['ev_external_dependents', 'ev_extension_members']) {
+      const sql = get(id).sql;
+      expect(sql.split("'pg_catalog.pg_policy'::regclass, y.oid, c.relnamespace FROM pg_catalog.pg_policy y JOIN pg_catalog.pg_class c ON c.oid = y.polrelid")).toHaveLength(2);
+      expect(sql.indexOf('pg_catalog.pg_policy')).toBeGreaterThan(sql.indexOf('pg_catalog.pg_attrdef'));
+    }
+  });
+  it('los cinco contratos afectados tienen exactamente los cambios esperados', () => {
+    const shape = (id: string) => get(id).columns.map(c => `${c.name}:${c.type}${c.nullable ? '?' : ''}`);
+    expect(shape('ev_outbound_references')).toEqual(['source_classid:string', 'source_objid:number', 'source_subid:number', 'group_classid:string',
+      'group_oid:number', 'deptype:string', 'ref_classid:string', 'ref_objid:number', 'ref_subid:number', 'target_schema:string?']);
+    expect(shape('ev_companion_items')).toEqual(['item_kind:string', 'item_classid:string', 'item_oid:number', 'item_namespace_oid:number',
+      'group_classid:string', 'group_oid:number', 'related_classid:string', 'related_oid:number', 'subtype:string', 'name:string',
+      'edge_deptype:string?', 'edge_ref_subid:string?', 'extension_edges:string']);
+    expect(shape('ev_internal_edges')).toEqual(['source_classid:string', 'source_objid:number', 'source_subid:number', 'source_group_classid:string',
+      'source_group_oid:number', 'deptype:string', 'ref_classid:string', 'ref_objid:number', 'ref_subid:number', 'ref_group_classid:string', 'ref_group_oid:number']);
+    for (const [id, maxRows, cls] of [['ev_outbound_references', 500, 'dependency'], ['ev_companion_items', 1000, 'inventory'], ['ev_internal_edges', 2000, 'dependency']] as const) {
+      const q = get(id);
+      expect(q.params).toEqual(['schema']); expect(q.maxRows).toBe(maxRows); expect(q.cardinality).toEqual({ min: 0, max: maxRows });
+      expect(q.class).toBe(cls); expect(q.requiredKeys).toBeNull(); expect(q.serverValidated).toBe(false);
+      expect(q.sql.endsWith(` LIMIT ${maxRows + 1}`)).toBe(true); expect(q.sql).toContain('ORDER BY');
+    }
+    expect(get('ev_outbound_references').incompleteWhen).toEqual([{ column: 'target_schema', op: 'isNull' }]);
+    expect(get('ev_companion_items').incompleteWhen).toEqual([]); expect(get('ev_internal_edges').incompleteWhen).toEqual([]);
+  });
+  it('el vocabulario cerrado incorpora solo los literales necesarios, ordenado y sin duplicados', () => {
+    for (const l of ['pg_catalog.pg_policy', 'sequence_owner', 'toast_candidate', 'toast_index_candidate', 'x']) expect(LITERALS).toContain(l);
+    expect([...LITERALS]).toEqual([...LITERALS].sort()); expect(new Set(LITERALS).size).toBe(LITERALS.length);
+    expect(ALLOWED_RELATIONS).toContain('pg_policy'); expect(ALLOWED_RELATIONS).toContain('pg_index');
+    for (const id of NEW_IDS) expect(auditSql(get(id).sql, { maxRows: get(id).maxRows, paramCount: 1 })).toBe(true);
+  });
+});
+
+describe('S1-C/C2.x: identidades, aristas y partición', () => {
+  const [outbound, companions, internal] = NEW_IDS.map(id => get(id).sql);
+  const addresses = (sql: string) => sql.slice(sql.indexOf('addresses AS ('), sql.indexOf(') SELECT DISTINCT'));
+  it('toda comparación de objid/refobjid va emparejada con su classid/refclassid, nunca un oid desnudo', () => {
+    for (const sql of [outbound, internal, companions]) {
+      for (const m of sql.matchAll(/\b(\w+)\.(objid|refobjid) = /g)) {
+        const before = sql.slice(Math.max(0, (m.index ?? 0) - 160), m.index);
+        const classColumn = m[2] === 'objid' ? 'classid' : 'refclassid';
+        expect(before).toMatch(new RegExp(`${m[1]}\\.${classColumn} = [^ ]+ AND $`));
+      }
+    }
+    expect(outbound).toContain('t.classid = d.refclassid AND t.objid = d.refobjid');
+    expect(internal).toContain('t.classid = d.refclassid AND t.objid = d.refobjid AND t.namespace = sc.oid');
+    expect(companions).toContain("d.classid = 'pg_catalog.pg_class'::regclass AND d.refclassid = 'pg_catalog.pg_class'::regclass AND d.deptype IN ('a', 'i') AND q.relkind = 'S'");
+    expect(companions).toContain("e.classid = i.item_classid AND e.objid = i.item_oid AND e.refclassid = 'pg_catalog.pg_extension'::regclass");
+  });
+  it('el mapa addresses es idéntico en outbound e internal, con grupo auxiliar por catálogo y namespace indirecto', () => {
+    expect(addresses(outbound)).toBe(addresses(internal)); expect(addresses(outbound).length).toBeGreaterThan(2000);
+    const map = addresses(outbound);
+    for (const fragment of [
+      "CASE WHEN t.typrelid <> 0 THEN 'pg_catalog.pg_class'::regclass ELSE 'pg_catalog.pg_type'::regclass END, CASE WHEN t.typrelid <> 0 THEN t.typrelid ELSE t.oid END",
+      "CASE WHEN k.conrelid <> 0 THEN 'pg_catalog.pg_class'::regclass ELSE 'pg_catalog.pg_type'::regclass END, CASE WHEN k.conrelid <> 0 THEN k.conrelid ELSE k.contypid END",
+      "'pg_catalog.pg_trigger'::regclass, g.oid, c.relnamespace, 'pg_catalog.pg_class'::regclass, g.tgrelid FROM pg_catalog.pg_trigger g JOIN pg_catalog.pg_class c ON c.oid = g.tgrelid",
+      "'pg_catalog.pg_rewrite'::regclass, r.oid, c.relnamespace, 'pg_catalog.pg_class'::regclass, r.ev_class FROM pg_catalog.pg_rewrite r JOIN pg_catalog.pg_class c ON c.oid = r.ev_class",
+      "'pg_catalog.pg_attrdef'::regclass, a.oid, c.relnamespace, 'pg_catalog.pg_class'::regclass, a.adrelid FROM pg_catalog.pg_attrdef a JOIN pg_catalog.pg_class c ON c.oid = a.adrelid",
+      "'pg_catalog.pg_policy'::regclass, y.oid, c.relnamespace, 'pg_catalog.pg_class'::regclass, y.polrelid FROM pg_catalog.pg_policy y JOIN pg_catalog.pg_class c ON c.oid = y.polrelid",
+      "'pg_catalog.pg_extension'::regclass, x.oid, x.extnamespace, 'pg_catalog.pg_extension'::regclass, x.oid",
+    ]) expect(map).toContain(fragment);
+  });
+  it('outbound e internal son predicados complementarios sobre el mismo origen y excluyen solo la arista al namespace', () => {
+    expect(outbound).toContain('LEFT JOIN addresses t ON t.classid = d.refclassid AND t.objid = d.refobjid');
+    expect(outbound).toContain('LEFT JOIN pg_catalog.pg_namespace tn ON tn.oid = t.namespace');
+    expect(outbound).toContain("WHERE NOT (d.refclassid = 'pg_catalog.pg_namespace'::regclass AND d.refobjid = sc.oid) AND (t.objid IS NULL OR tn.nspname IS NULL OR tn.nspname <> $1::name)");
+    expect(internal).toContain('JOIN addresses t ON t.classid = d.refclassid AND t.objid = d.refobjid AND t.namespace = sc.oid');
+    expect(internal.slice(internal.indexOf(') SELECT DISTINCT'))).not.toMatch(/LEFT JOIN|pg_namespace'::regclass|WHERE/);
+    const source = 'FROM addresses s JOIN scope sc ON sc.oid = s.namespace JOIN pg_catalog.pg_depend d ON d.classid = s.classid AND d.objid = s.objid';
+    expect(outbound).toContain(source); expect(internal).toContain(source);
+    expect(addresses(outbound)).not.toContain("'pg_catalog.pg_namespace'::regclass");
+  });
+  it('conserva cada arista con su deptype y subcolumnas: DISTINCT solo sobre columnas de identidad y tipo', () => {
+    for (const sql of [outbound, internal]) {
+      for (const c of ['d.objsubid AS source_subid', 'd.deptype::text AS deptype', 'd.refobjsubid AS ref_subid']) expect(sql).toContain(c);
+      expect(sql).toContain('SELECT DISTINCT'); expect(sql).not.toMatch(/string_agg|\bcount\(/);
+    }
+    expect(companions).not.toMatch(/string_agg|dep_to_owner|dep_to_related/);
+    expect(companions).toContain("q.relname::text, d.deptype::text, d.refobjsubid::text FROM pg_catalog.pg_depend d JOIN rels r ON r.oid = d.refobjid");
+  });
+  it('TOAST: se listan candidatos con la arista como dato, sin clasificarlos como seguros', () => {
+    for (const kind of ['toast_candidate', 'toast_index_candidate']) expect(companions).toContain(`'${kind}'`);
+    expect(companions).not.toMatch(/pg_toast|safe|companion_ok/i);
+    expect(companions).toContain('LEFT JOIN pg_catalog.pg_depend d ON d.classid = \'pg_catalog.pg_class\'::regclass AND d.objid = t.oid AND d.refclassid = \'pg_catalog.pg_class\'::regclass AND d.refobjid = r.oid');
+    expect(companions).toContain('LEFT JOIN pg_catalog.pg_depend d ON d.classid = \'pg_catalog.pg_class\'::regclass AND d.objid = ix.indexrelid AND d.refclassid = \'pg_catalog.pg_class\'::regclass AND d.refobjid = t.oid');
+    const limits = get('ev_companion_items').limits.join(' ');
+    expect(limits).toMatch(/TOAST objects are NOT classified as safe.*pg_toast namespace.*internal \('i'\) edge.*reltoastrelid correspondence.*allowed class/s);
+    expect(limits).toMatch(/serial sequences use 'a', identity sequences use 'i'.*no edge folding/s);
+    expect(limits).toMatch(/NULL edge_deptype on an edge-defined kind is an anomaly.*never evidence of safety/s);
+  });
+  it('documenta la partición, el bucket del namespace, los orígenes sin mapa y la colisión de oids', () => {
+    const l = LIMITATIONS.join(' ');
+    expect(l).toMatch(/edge to the target namespace itself is observed by no query.*within one snapshot/s);
+    expect(l).toMatch(/Sources of unmapped classes, TOAST objects, domain constraints.*unresolved closure rows or NULL destinations/s);
+    expect(l).toMatch(/classid \+ objid \(\+ subid\).*oids of different catalogs can coincide.*reject cross-catalog oid collisions/s);
+    expect(PENDING.join(' ')).toMatch(/TOAST acceptance, cycle and joint-statement analysis.*belong to C3\/C4/);
+    expect(get('ev_internal_edges').limits.join(' ')).toMatch(/do not by themselves define a linear removal order/);
+    expect(get('ev_outbound_references').limits.join(' ')).toMatch(/KEPT with a NULL target_schema.*never silently dropped/s);
+  });
+});
+
+describe('S1-C/C2.x: checkRows adversarial sobre las consultas nuevas', () => {
+  it.each(NEW_IDS)('%s: forma válida, truncamiento, columnas y tipos', id => {
+    const q = get(id); const one = builders[id]();
+    expect(checkRows(id, [])).toEqual(OK); expect(checkRows(id, [one])).toEqual(OK);
+    expect(checkRows(id, Array.from({ length: q.maxRows }, () => one))).toEqual(OK);
+    expect(checkRows(id, Array.from({ length: q.maxRows + 1 }, () => one))).toEqual({ ok: false, truncated: true, code: 'evidence_query_truncated', serverValidated: false });
+    expect(checkRows(id, Array.from({ length: q.maxRows + 2 }, () => one))).toEqual(INVALID);
+    expect(checkRows(id, [{ ...one, extra: 1 }])).toEqual(INVALID);
+    for (const c of q.columns) {
+      const { [c.name]: removed, ...missing } = one; void removed;
+      expect(checkRows(id, [missing])).toEqual(INVALID);
+      const wrong = c.type === 'number' ? 'x' : c.type === 'string' ? 1 : 'x';
+      expect(checkRows(id, [{ ...one, [c.name]: wrong }])).toEqual(INVALID);
+      const result = checkRows(id, [{ ...one, [c.name]: null }]);
+      if (c.nullable && c.name !== 'target_schema') expect(result).toEqual(OK);
+      else if (c.name === 'target_schema') expect(result).toEqual(incomplete);
+      else expect(result).toEqual(INVALID);
+    }
+  });
+  it.each([undefined, null, 'error', new Error('boom'), { rows: [] }, Promise.resolve([])])('una consulta fallida nunca es lista vacía válida %#', failed => {
+    for (const id of NEW_IDS) expect(checkRows(id, failed)).toEqual(INVALID);
+  });
+  it('destinos desconocidos o no resueltos hacen la evidencia incompleta, aunque haya menos de maxRows filas', () => {
+    expect(checkRows('ev_outbound_references', [outboundRow()])).toEqual(OK);
+    expect(checkRows('ev_outbound_references', [outboundRow({ target_schema: null })])).toEqual(incomplete);
+    expect(checkRows('ev_outbound_references', [outboundRow(), outboundRow({ ref_classid: 'pg_language', ref_objid: 12, target_schema: null })])).toEqual(incomplete);
+    expect(checkRows('ev_outbound_references', [outboundRow({ deptype: 'e', ref_classid: 'pg_extension', target_schema: 'public' })])).toEqual(OK);
+    expect(checkRows('ev_outbound_references', [{ ...outboundRow(), target_schema: undefined }])).toEqual(INVALID);
+  });
+  it('no mezcla catálogos: el mismo oid con distinto classid son aristas distintas y la identidad exige classid', () => {
+    const rows = [internalRow({ source_classid: 'pg_constraint', source_objid: 7 }), internalRow({ source_classid: 'pg_class', source_objid: 7 })];
+    expect(checkRows('ev_internal_edges', rows)).toEqual(OK);
+    expect(new Set(rows.map(r => `${r.source_classid}:${r.source_objid}`)).size).toBe(2);
+    const { source_classid: removed, ...withoutClass } = internalRow(); void removed;
+    expect(checkRows('ev_internal_edges', [withoutClass])).toEqual(INVALID);
+    const { group_classid: removedGroup, ...withoutGroupClass } = outboundRow(); void removedGroup;
+    expect(checkRows('ev_outbound_references', [withoutGroupClass])).toEqual(INVALID);
+  });
+  it('serial e identity: filas por arista con deptype a/i y la columna propietaria como texto; sin plegar', () => {
+    const serial = companionRow({ edge_deptype: 'a', edge_ref_subid: '1' });
+    const identity = companionRow({ item_oid: 31, name: 't_gen_seq', edge_deptype: 'i', edge_ref_subid: '2' });
+    const twoColumns = companionRow({ edge_deptype: 'a', edge_ref_subid: '2' });
+    expect(checkRows('ev_companion_items', [serial, identity, twoColumns])).toEqual(OK);
+    expect(checkRows('ev_companion_items', [companionRow({ edge_ref_subid: 2 })])).toEqual(INVALID);
+    expect(checkRows('ev_companion_items', [companionRow({ item_kind: 'toast_candidate', edge_deptype: null, edge_ref_subid: null })])).toEqual(OK);
+  });
+  it('las filas de TOAST sin arista son válidas en forma y no llevan ningún campo de seguridad: la decisión es de C3', () => {
+    const result = checkRows('ev_companion_items', [companionRow({ item_kind: 'toast_candidate', item_namespace_oid: 99, edge_deptype: null, edge_ref_subid: null })]);
+    expect(Object.keys(result).sort()).toEqual(['code', 'ok', 'serverValidated', 'truncated']);
+    expect(get('ev_companion_items').columns.map(c => c.name)).not.toEqual(expect.arrayContaining(['safe', 'verified', 'accepted']));
+  });
+  it.each(NEW_IDS)('%s: build solo acepta el esquema y rechaza parámetros extra o inválidos', id => {
+    expect(build(id, { schema: NAME }).values).toEqual([NAME]);
+    expect(build(id, { schema: NAME }).serverValidated).toBe(false);
+    for (const bad of [{}, { schema: NAME, oid: 1 }, { schema: NAME, serverValidated: true }, { schema: NAME + '\n' }, { schema: 'x"; DROP' },
+      { schema: NAME.toUpperCase() }, { schema: null }, { schema: [NAME] }, [NAME], null]) expect(() => build(id, bad)).toThrow('evidence_query_params');
   });
 });

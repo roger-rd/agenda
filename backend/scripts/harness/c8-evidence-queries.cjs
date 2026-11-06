@@ -36,11 +36,15 @@ const LIMITATIONS = Object.freeze([
   'Identity signatures miss storage changes and index validity changes.',
   'Other roles sessions have restricted visibility without statistics privileges.',
   'A snapshot does not follow subsequent changes; double collection belongs to the collector, not this module.',
+  'The edge to the target namespace itself is observed by no query; ev_internal_edges and ev_outbound_references partition the other edges of mapped-class sources only within one snapshot.',
+  'Sources of unmapped classes, TOAST objects, domain constraints and destinations of unmapped classes are never enumerated: they surface only as unresolved closure rows or NULL destinations.',
+  'Object identity is classid + objid (+ subid); oids of different catalogs can coincide, so group_oid and bare oids are auxiliary and a consumer must reject cross-catalog oid collisions.',
   'No query has been validated against a real PostgreSQL server.',
 ]);
 const PENDING = Object.freeze([
   'Physical backend identity binding and server transaction identity remain pending.',
   'Companion classes require individual justification and validation before policy expansion.',
+  'TOAST acceptance, cycle and joint-statement analysis, and per-kind companion validation belong to C3/C4; none is decided by these queries.',
   'Functions, procedures, types, domains, materialized views and partitioned tables remain pending as removal candidates.',
   'Publications, subscriptions, FDW and large objects require specific analysis.',
   'Real PostgreSQL 16 validation: S2-bis must verify the exact SQL text (sqlSha256) and the result shapes before C3 may treat any row as demonstrated evidence; serverValidated stays false until then.',
@@ -482,7 +486,7 @@ const CATALOG = Object.freeze([
     "id": "ev_external_dependents",
     "incompleteWhen": [{ "column": "depth", "op": "gte", "value": 17 }, { "column": "namespace", "op": "isNull" }],
     "purpose": "external dependents",
-    "sql": "WITH RECURSIVE scope AS (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = $1::name), walk AS (\nSELECT 1 AS depth, d.classid, d.objid, d.objsubid, d.deptype, d.refclassid, d.refobjid, '/' || d.classid::text || ':' || d.objid::text || ':' || d.objsubid::text || '/' AS path FROM pg_catalog.pg_depend d JOIN scope s ON s.oid = d.refobjid WHERE d.refclassid = 'pg_catalog.pg_namespace'::regclass AND d.deptype IN ('n', 'a', 'i', 'P', 'S')\nUNION ALL\nSELECT w.depth + 1, d.classid, d.objid, d.objsubid, d.deptype, d.refclassid, d.refobjid, w.path || d.classid::text || ':' || d.objid::text || ':' || d.objsubid::text || '/' FROM pg_catalog.pg_depend d JOIN walk w ON d.refclassid = w.classid AND d.refobjid = w.objid AND (w.objsubid = 0 OR d.refobjsubid = w.objsubid) WHERE w.depth < 17 AND pg_catalog.strpos(w.path, '/' || d.classid::text || ':' || d.objid::text || ':' || d.objsubid::text || '/') = 0 AND d.deptype IN ('n', 'a', 'i', 'P', 'S')), addresses AS (SELECT 'pg_catalog.pg_class'::regclass AS classid, c.oid AS objid, c.relnamespace AS namespace FROM pg_catalog.pg_class c\nUNION ALL SELECT 'pg_catalog.pg_proc'::regclass, p.oid, p.pronamespace FROM pg_catalog.pg_proc p\nUNION ALL SELECT 'pg_catalog.pg_type'::regclass, t.oid, t.typnamespace FROM pg_catalog.pg_type t\nUNION ALL SELECT 'pg_catalog.pg_constraint'::regclass, c.oid, c.connamespace FROM pg_catalog.pg_constraint c\nUNION ALL SELECT 'pg_catalog.pg_trigger'::regclass, t.oid, c.relnamespace FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid\nUNION ALL SELECT 'pg_catalog.pg_rewrite'::regclass, r.oid, c.relnamespace FROM pg_catalog.pg_rewrite r JOIN pg_catalog.pg_class c ON c.oid = r.ev_class\nUNION ALL SELECT 'pg_catalog.pg_attrdef'::regclass, a.oid, c.relnamespace FROM pg_catalog.pg_attrdef a JOIN pg_catalog.pg_class c ON c.oid = a.adrelid) SELECT DISTINCT w.depth, w.classid::regclass::text AS classid, w.objid, w.objsubid, w.deptype::text AS deptype, w.refclassid::regclass::text AS refclassid, w.refobjid, n.nspname::text AS namespace FROM walk w LEFT JOIN addresses a ON a.classid = w.classid AND a.objid = w.objid LEFT JOIN pg_catalog.pg_namespace n ON n.oid = a.namespace WHERE a.objid IS NULL OR n.nspname IS NULL OR n.nspname <> $1::name ORDER BY depth, classid, objid, objsubid, deptype, refclassid, refobjid, namespace LIMIT 501",
+    "sql": "WITH RECURSIVE scope AS (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = $1::name), walk AS (\nSELECT 1 AS depth, d.classid, d.objid, d.objsubid, d.deptype, d.refclassid, d.refobjid, '/' || d.classid::text || ':' || d.objid::text || ':' || d.objsubid::text || '/' AS path FROM pg_catalog.pg_depend d JOIN scope s ON s.oid = d.refobjid WHERE d.refclassid = 'pg_catalog.pg_namespace'::regclass AND d.deptype IN ('n', 'a', 'i', 'P', 'S')\nUNION ALL\nSELECT w.depth + 1, d.classid, d.objid, d.objsubid, d.deptype, d.refclassid, d.refobjid, w.path || d.classid::text || ':' || d.objid::text || ':' || d.objsubid::text || '/' FROM pg_catalog.pg_depend d JOIN walk w ON d.refclassid = w.classid AND d.refobjid = w.objid AND (w.objsubid = 0 OR d.refobjsubid = w.objsubid) WHERE w.depth < 17 AND pg_catalog.strpos(w.path, '/' || d.classid::text || ':' || d.objid::text || ':' || d.objsubid::text || '/') = 0 AND d.deptype IN ('n', 'a', 'i', 'P', 'S')), addresses AS (SELECT 'pg_catalog.pg_class'::regclass AS classid, c.oid AS objid, c.relnamespace AS namespace FROM pg_catalog.pg_class c\nUNION ALL SELECT 'pg_catalog.pg_proc'::regclass, p.oid, p.pronamespace FROM pg_catalog.pg_proc p\nUNION ALL SELECT 'pg_catalog.pg_type'::regclass, t.oid, t.typnamespace FROM pg_catalog.pg_type t\nUNION ALL SELECT 'pg_catalog.pg_constraint'::regclass, c.oid, c.connamespace FROM pg_catalog.pg_constraint c\nUNION ALL SELECT 'pg_catalog.pg_trigger'::regclass, t.oid, c.relnamespace FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid\nUNION ALL SELECT 'pg_catalog.pg_rewrite'::regclass, r.oid, c.relnamespace FROM pg_catalog.pg_rewrite r JOIN pg_catalog.pg_class c ON c.oid = r.ev_class\nUNION ALL SELECT 'pg_catalog.pg_attrdef'::regclass, a.oid, c.relnamespace FROM pg_catalog.pg_attrdef a JOIN pg_catalog.pg_class c ON c.oid = a.adrelid UNION ALL SELECT 'pg_catalog.pg_policy'::regclass, y.oid, c.relnamespace FROM pg_catalog.pg_policy y JOIN pg_catalog.pg_class c ON c.oid = y.polrelid) SELECT DISTINCT w.depth, w.classid::regclass::text AS classid, w.objid, w.objsubid, w.deptype::text AS deptype, w.refclassid::regclass::text AS refclassid, w.refobjid, n.nspname::text AS namespace FROM walk w LEFT JOIN addresses a ON a.classid = w.classid AND a.objid = w.objid LEFT JOIN pg_catalog.pg_namespace n ON n.oid = a.namespace WHERE a.objid IS NULL OR n.nspname IS NULL OR n.nspname <> $1::name ORDER BY depth, classid, objid, objsubid, deptype, refclassid, refobjid, namespace LIMIT 501",
     "params": [
         "schema"
     ],
@@ -498,14 +502,14 @@ const CATALOG = Object.freeze([
         { "name": "namespace", "type": "string", "nullable": true }
     ],
     "limits": [
-        "Maximum evaluable depth is 16; a depth 17 row is a sentinel and makes the evidence incomplete, but absence of sentinels here cannot prove traversal completeness (compare with ev_closure). Class mapping is best-effort for class/proc/type/constraint/trigger/rewrite/attrdef only: rows whose class or namespace cannot be resolved are KEPT with a NULL namespace and make the evidence incomplete or unresolved (never silently dropped). Objects in pg_toast are not classified as safe companions here: a consumer may only accept one with a verifiable internal ('i') edge (refclassid/refobjid) to an in-schema relation and an allowed class. A failed or timed-out query is not an empty result."
+        "Maximum evaluable depth is 16; a depth 17 row is a sentinel and makes the evidence incomplete, but absence of sentinels here cannot prove traversal completeness (compare with ev_closure). Class mapping is best-effort for class/proc/type/constraint/trigger/rewrite/attrdef/policy only: rows whose class or namespace cannot be resolved are KEPT with a NULL namespace and make the evidence incomplete or unresolved (never silently dropped). Objects in pg_toast are not classified as safe companions here: a consumer may only accept one with a verifiable internal ('i') edge (refclassid/refobjid) to an in-schema relation and an allowed class. A failed or timed-out query is not an empty result."
     ],
     "class": "dependency"
 }),
   entry({
     "id": "ev_extension_members",
     "purpose": "extension members",
-    "sql": "WITH addresses AS (SELECT 'pg_catalog.pg_class'::regclass AS classid, c.oid AS objid, c.relnamespace AS namespace FROM pg_catalog.pg_class c\nUNION ALL SELECT 'pg_catalog.pg_proc'::regclass, p.oid, p.pronamespace FROM pg_catalog.pg_proc p\nUNION ALL SELECT 'pg_catalog.pg_type'::regclass, t.oid, t.typnamespace FROM pg_catalog.pg_type t\nUNION ALL SELECT 'pg_catalog.pg_constraint'::regclass, c.oid, c.connamespace FROM pg_catalog.pg_constraint c\nUNION ALL SELECT 'pg_catalog.pg_trigger'::regclass, t.oid, c.relnamespace FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid\nUNION ALL SELECT 'pg_catalog.pg_rewrite'::regclass, r.oid, c.relnamespace FROM pg_catalog.pg_rewrite r JOIN pg_catalog.pg_class c ON c.oid = r.ev_class\nUNION ALL SELECT 'pg_catalog.pg_attrdef'::regclass, a.oid, c.relnamespace FROM pg_catalog.pg_attrdef a JOIN pg_catalog.pg_class c ON c.oid = a.adrelid UNION ALL SELECT 'pg_catalog.pg_namespace'::regclass, x.oid, x.oid FROM pg_catalog.pg_namespace x UNION ALL SELECT 'pg_catalog.pg_operator'::regclass, x.oid, x.oprnamespace FROM pg_catalog.pg_operator x UNION ALL SELECT 'pg_catalog.pg_collation'::regclass, x.oid, x.collnamespace FROM pg_catalog.pg_collation x UNION ALL SELECT 'pg_catalog.pg_conversion'::regclass, x.oid, x.connamespace FROM pg_catalog.pg_conversion x UNION ALL SELECT 'pg_catalog.pg_opclass'::regclass, x.oid, x.opcnamespace FROM pg_catalog.pg_opclass x UNION ALL SELECT 'pg_catalog.pg_opfamily'::regclass, x.oid, x.opfnamespace FROM pg_catalog.pg_opfamily x UNION ALL SELECT 'pg_catalog.pg_ts_config'::regclass, x.oid, x.cfgnamespace FROM pg_catalog.pg_ts_config x UNION ALL SELECT 'pg_catalog.pg_ts_dict'::regclass, x.oid, x.dictnamespace FROM pg_catalog.pg_ts_dict x UNION ALL SELECT 'pg_catalog.pg_ts_parser'::regclass, x.oid, x.prsnamespace FROM pg_catalog.pg_ts_parser x UNION ALL SELECT 'pg_catalog.pg_ts_template'::regclass, x.oid, x.tmplnamespace FROM pg_catalog.pg_ts_template x UNION ALL SELECT 'pg_catalog.pg_statistic_ext'::regclass, x.oid, x.stxnamespace FROM pg_catalog.pg_statistic_ext x), members AS (SELECT e.oid AS extension_oid, e.extname::text AS extension_name, d.classid::regclass::text AS classid, d.objid, d.objsubid FROM pg_catalog.pg_depend d JOIN addresses a ON a.classid = d.classid AND a.objid = d.objid JOIN pg_catalog.pg_namespace n ON n.oid = a.namespace JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid WHERE d.refclassid = 'pg_catalog.pg_extension'::regclass AND d.deptype = 'e' AND n.nspname = $1::name UNION SELECT e.oid, e.extname::text, 'pg_catalog.pg_extension', e.oid, 0 FROM pg_catalog.pg_extension e JOIN pg_catalog.pg_namespace n ON n.oid = e.extnamespace WHERE n.nspname = $1::name) SELECT extension_oid, extension_name, classid, objid, objsubid FROM members ORDER BY extension_oid, classid, objid, objsubid LIMIT 501",
+    "sql": "WITH addresses AS (SELECT 'pg_catalog.pg_class'::regclass AS classid, c.oid AS objid, c.relnamespace AS namespace FROM pg_catalog.pg_class c\nUNION ALL SELECT 'pg_catalog.pg_proc'::regclass, p.oid, p.pronamespace FROM pg_catalog.pg_proc p\nUNION ALL SELECT 'pg_catalog.pg_type'::regclass, t.oid, t.typnamespace FROM pg_catalog.pg_type t\nUNION ALL SELECT 'pg_catalog.pg_constraint'::regclass, c.oid, c.connamespace FROM pg_catalog.pg_constraint c\nUNION ALL SELECT 'pg_catalog.pg_trigger'::regclass, t.oid, c.relnamespace FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid\nUNION ALL SELECT 'pg_catalog.pg_rewrite'::regclass, r.oid, c.relnamespace FROM pg_catalog.pg_rewrite r JOIN pg_catalog.pg_class c ON c.oid = r.ev_class\nUNION ALL SELECT 'pg_catalog.pg_attrdef'::regclass, a.oid, c.relnamespace FROM pg_catalog.pg_attrdef a JOIN pg_catalog.pg_class c ON c.oid = a.adrelid UNION ALL SELECT 'pg_catalog.pg_policy'::regclass, y.oid, c.relnamespace FROM pg_catalog.pg_policy y JOIN pg_catalog.pg_class c ON c.oid = y.polrelid UNION ALL SELECT 'pg_catalog.pg_namespace'::regclass, x.oid, x.oid FROM pg_catalog.pg_namespace x UNION ALL SELECT 'pg_catalog.pg_operator'::regclass, x.oid, x.oprnamespace FROM pg_catalog.pg_operator x UNION ALL SELECT 'pg_catalog.pg_collation'::regclass, x.oid, x.collnamespace FROM pg_catalog.pg_collation x UNION ALL SELECT 'pg_catalog.pg_conversion'::regclass, x.oid, x.connamespace FROM pg_catalog.pg_conversion x UNION ALL SELECT 'pg_catalog.pg_opclass'::regclass, x.oid, x.opcnamespace FROM pg_catalog.pg_opclass x UNION ALL SELECT 'pg_catalog.pg_opfamily'::regclass, x.oid, x.opfnamespace FROM pg_catalog.pg_opfamily x UNION ALL SELECT 'pg_catalog.pg_ts_config'::regclass, x.oid, x.cfgnamespace FROM pg_catalog.pg_ts_config x UNION ALL SELECT 'pg_catalog.pg_ts_dict'::regclass, x.oid, x.dictnamespace FROM pg_catalog.pg_ts_dict x UNION ALL SELECT 'pg_catalog.pg_ts_parser'::regclass, x.oid, x.prsnamespace FROM pg_catalog.pg_ts_parser x UNION ALL SELECT 'pg_catalog.pg_ts_template'::regclass, x.oid, x.tmplnamespace FROM pg_catalog.pg_ts_template x UNION ALL SELECT 'pg_catalog.pg_statistic_ext'::regclass, x.oid, x.stxnamespace FROM pg_catalog.pg_statistic_ext x), members AS (SELECT e.oid AS extension_oid, e.extname::text AS extension_name, d.classid::regclass::text AS classid, d.objid, d.objsubid FROM pg_catalog.pg_depend d JOIN addresses a ON a.classid = d.classid AND a.objid = d.objid JOIN pg_catalog.pg_namespace n ON n.oid = a.namespace JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid WHERE d.refclassid = 'pg_catalog.pg_extension'::regclass AND d.deptype = 'e' AND n.nspname = $1::name UNION SELECT e.oid, e.extname::text, 'pg_catalog.pg_extension', e.oid, 0 FROM pg_catalog.pg_extension e JOIN pg_catalog.pg_namespace n ON n.oid = e.extnamespace WHERE n.nspname = $1::name) SELECT extension_oid, extension_name, classid, objid, objsubid FROM members ORDER BY extension_oid, classid, objid, objsubid LIMIT 501",
     "params": [
         "schema"
     ],
@@ -538,7 +542,7 @@ const CATALOG = Object.freeze([
         }
     ],
     "limits": [
-        "Namespace-address mapping includes relations, routines, types, companions, operators, collations, conversions, operator classes/families, text search and extended statistics; database-wide or unmapped classes remain outside coverage. Extension namespace entries are also included."
+        "Namespace-address mapping includes relations, routines, types, companions (constraints, triggers, rules, defaults, policies), operators, collations, conversions, operator classes/families, text search and extended statistics; database-wide or unmapped classes remain outside coverage. Extension namespace entries are also included."
     ],
     "class": "extension"
 }),
@@ -846,9 +850,230 @@ const CATALOG = Object.freeze([
     ],
     "class": "concurrency"
 }),
+  entry({
+    "id": "ev_outbound_references",
+    "purpose": "outbound references",
+    "sql": "WITH scope AS (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = $1::name), addresses AS (SELECT 'pg_catalog.pg_class'::regclass AS classid, c.oid AS objid, c.relnamespace AS namespace, 'pg_catalog.pg_class'::regclass AS group_classid, c.oid AS group_oid FROM pg_catalog.pg_class c\nUNION ALL SELECT 'pg_catalog.pg_proc'::regclass, p.oid, p.pronamespace, 'pg_catalog.pg_proc'::regclass, p.oid FROM pg_catalog.pg_proc p\nUNION ALL SELECT 'pg_catalog.pg_type'::regclass, t.oid, t.typnamespace, CASE WHEN t.typrelid <> 0 THEN 'pg_catalog.pg_class'::regclass ELSE 'pg_catalog.pg_type'::regclass END, CASE WHEN t.typrelid <> 0 THEN t.typrelid ELSE t.oid END FROM pg_catalog.pg_type t\nUNION ALL SELECT 'pg_catalog.pg_constraint'::regclass, k.oid, k.connamespace, CASE WHEN k.conrelid <> 0 THEN 'pg_catalog.pg_class'::regclass ELSE 'pg_catalog.pg_type'::regclass END, CASE WHEN k.conrelid <> 0 THEN k.conrelid ELSE k.contypid END FROM pg_catalog.pg_constraint k\nUNION ALL SELECT 'pg_catalog.pg_trigger'::regclass, g.oid, c.relnamespace, 'pg_catalog.pg_class'::regclass, g.tgrelid FROM pg_catalog.pg_trigger g JOIN pg_catalog.pg_class c ON c.oid = g.tgrelid\nUNION ALL SELECT 'pg_catalog.pg_rewrite'::regclass, r.oid, c.relnamespace, 'pg_catalog.pg_class'::regclass, r.ev_class FROM pg_catalog.pg_rewrite r JOIN pg_catalog.pg_class c ON c.oid = r.ev_class\nUNION ALL SELECT 'pg_catalog.pg_attrdef'::regclass, a.oid, c.relnamespace, 'pg_catalog.pg_class'::regclass, a.adrelid FROM pg_catalog.pg_attrdef a JOIN pg_catalog.pg_class c ON c.oid = a.adrelid\nUNION ALL SELECT 'pg_catalog.pg_policy'::regclass, y.oid, c.relnamespace, 'pg_catalog.pg_class'::regclass, y.polrelid FROM pg_catalog.pg_policy y JOIN pg_catalog.pg_class c ON c.oid = y.polrelid\nUNION ALL SELECT 'pg_catalog.pg_collation'::regclass, x.oid, x.collnamespace, 'pg_catalog.pg_collation'::regclass, x.oid FROM pg_catalog.pg_collation x\nUNION ALL SELECT 'pg_catalog.pg_operator'::regclass, x.oid, x.oprnamespace, 'pg_catalog.pg_operator'::regclass, x.oid FROM pg_catalog.pg_operator x\nUNION ALL SELECT 'pg_catalog.pg_opclass'::regclass, x.oid, x.opcnamespace, 'pg_catalog.pg_opclass'::regclass, x.oid FROM pg_catalog.pg_opclass x\nUNION ALL SELECT 'pg_catalog.pg_opfamily'::regclass, x.oid, x.opfnamespace, 'pg_catalog.pg_opfamily'::regclass, x.oid FROM pg_catalog.pg_opfamily x\nUNION ALL SELECT 'pg_catalog.pg_extension'::regclass, x.oid, x.extnamespace, 'pg_catalog.pg_extension'::regclass, x.oid FROM pg_catalog.pg_extension x) SELECT DISTINCT s.classid::regclass::text AS source_classid, s.objid AS source_objid, d.objsubid AS source_subid, s.group_classid::regclass::text AS group_classid, s.group_oid AS group_oid, d.deptype::text AS deptype, d.refclassid::regclass::text AS ref_classid, d.refobjid AS ref_objid, d.refobjsubid AS ref_subid, tn.nspname::text AS target_schema FROM addresses s JOIN scope sc ON sc.oid = s.namespace JOIN pg_catalog.pg_depend d ON d.classid = s.classid AND d.objid = s.objid LEFT JOIN addresses t ON t.classid = d.refclassid AND t.objid = d.refobjid LEFT JOIN pg_catalog.pg_namespace tn ON tn.oid = t.namespace WHERE NOT (d.refclassid = 'pg_catalog.pg_namespace'::regclass AND d.refobjid = sc.oid) AND (t.objid IS NULL OR tn.nspname IS NULL OR tn.nspname <> $1::name) ORDER BY source_classid, source_objid, source_subid, deptype, ref_classid, ref_objid, ref_subid, target_schema LIMIT 501",
+    "params": [
+        "schema"
+    ],
+    "maxRows": 500,
+    "incompleteWhen": [
+        {
+            "column": "target_schema",
+            "op": "isNull"
+        }
+    ],
+    "columns": [
+        {
+            "name": "source_classid",
+            "type": "string",
+            "nullable": false
+        },
+        {
+            "name": "source_objid",
+            "type": "number",
+            "nullable": false
+        },
+        {
+            "name": "source_subid",
+            "type": "number",
+            "nullable": false
+        },
+        {
+            "name": "group_classid",
+            "type": "string",
+            "nullable": false
+        },
+        {
+            "name": "group_oid",
+            "type": "number",
+            "nullable": false
+        },
+        {
+            "name": "deptype",
+            "type": "string",
+            "nullable": false
+        },
+        {
+            "name": "ref_classid",
+            "type": "string",
+            "nullable": false
+        },
+        {
+            "name": "ref_objid",
+            "type": "number",
+            "nullable": false
+        },
+        {
+            "name": "ref_subid",
+            "type": "number",
+            "nullable": false
+        },
+        {
+            "name": "target_schema",
+            "type": "string",
+            "nullable": true
+        }
+    ],
+    "limits": [
+        "One row per dependency edge (classid, objid, objsubid) -> (refclassid, refobjid, refobjsubid) from mapped-class objects of the target namespace to anything outside it, excluding only the edge to the target namespace itself (the unobserved namespace bucket). group_classid/group_oid are auxiliary grouping data (owning relation or the object itself), never an identity; oids from different catalogs are only comparable together with their classid. A destination of an unmapped class, a dangling namespace or another pg_namespace is KEPT with a NULL target_schema and makes the evidence incomplete or unresolved (never silently dropped). Edges of type e/x mean extension membership. Not covered: sources of unmapped classes in the namespace, dependencies not recorded in pg_depend (function bodies with string literals, dynamic SQL), pinned objects and shared (role) dependencies. Edges from objects outside the namespace are in ev_external_dependents. Truncation (row 501) is incomplete. A failed or timed-out query is not an empty result."
+    ],
+    "class": "dependency"
+}),
+  entry({
+    "id": "ev_companion_items",
+    "purpose": "companion items",
+    "sql": "WITH scope AS (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = $1::name), rels AS (SELECT c.oid, c.relnamespace, c.reltoastrelid FROM pg_catalog.pg_class c JOIN scope s ON s.oid = c.relnamespace), items AS (SELECT 'constraint'::text AS item_kind, 'pg_catalog.pg_constraint'::regclass AS item_classid, k.oid AS item_oid, k.connamespace AS item_namespace_oid, 'pg_catalog.pg_class'::regclass::text AS group_classid, k.conrelid AS group_oid, 'pg_catalog.pg_class'::regclass::text AS related_classid, k.conindid AS related_oid, k.contype::text AS subtype, k.conname::text AS name, NULL::text AS edge_deptype, NULL::text AS edge_ref_subid FROM pg_catalog.pg_constraint k JOIN rels r ON r.oid = k.conrelid\nUNION ALL SELECT 'trigger', 'pg_catalog.pg_trigger'::regclass, g.oid, r.relnamespace, 'pg_catalog.pg_class'::regclass::text, g.tgrelid, 'pg_catalog.pg_constraint'::regclass::text, g.tgconstraint, g.tgisinternal::text, g.tgname::text, NULL, NULL FROM pg_catalog.pg_trigger g JOIN rels r ON r.oid = g.tgrelid\nUNION ALL SELECT 'rule', 'pg_catalog.pg_rewrite'::regclass, w.oid, r.relnamespace, 'pg_catalog.pg_class'::regclass::text, w.ev_class, '', 0::oid, w.ev_type::text, w.rulename::text, NULL, NULL FROM pg_catalog.pg_rewrite w JOIN rels r ON r.oid = w.ev_class\nUNION ALL SELECT 'attrdef', 'pg_catalog.pg_attrdef'::regclass, a.oid, r.relnamespace, 'pg_catalog.pg_class'::regclass::text, a.adrelid, '', 0::oid, a.adnum::text, '', NULL, NULL FROM pg_catalog.pg_attrdef a JOIN rels r ON r.oid = a.adrelid\nUNION ALL SELECT 'policy', 'pg_catalog.pg_policy'::regclass, y.oid, r.relnamespace, 'pg_catalog.pg_class'::regclass::text, y.polrelid, '', 0::oid, y.polcmd::text, y.polname::text, NULL, NULL FROM pg_catalog.pg_policy y JOIN rels r ON r.oid = y.polrelid\nUNION ALL SELECT 'sequence_owner', 'pg_catalog.pg_class'::regclass, q.oid, q.relnamespace, 'pg_catalog.pg_class'::regclass::text, d.refobjid, '', 0::oid, q.relkind::text, q.relname::text, d.deptype::text, d.refobjsubid::text FROM pg_catalog.pg_depend d JOIN rels r ON r.oid = d.refobjid JOIN pg_catalog.pg_class q ON q.oid = d.objid WHERE d.classid = 'pg_catalog.pg_class'::regclass AND d.refclassid = 'pg_catalog.pg_class'::regclass AND d.deptype IN ('a', 'i') AND q.relkind = 'S'\nUNION ALL SELECT 'toast_candidate', 'pg_catalog.pg_class'::regclass, t.oid, t.relnamespace, 'pg_catalog.pg_class'::regclass::text, r.oid, '', 0::oid, t.relkind::text, t.relname::text, d.deptype::text, d.refobjsubid::text FROM rels r JOIN pg_catalog.pg_class t ON t.oid = r.reltoastrelid LEFT JOIN pg_catalog.pg_depend d ON d.classid = 'pg_catalog.pg_class'::regclass AND d.objid = t.oid AND d.refclassid = 'pg_catalog.pg_class'::regclass AND d.refobjid = r.oid\nUNION ALL SELECT 'toast_index_candidate', 'pg_catalog.pg_class'::regclass, ix.indexrelid, xc.relnamespace, 'pg_catalog.pg_class'::regclass::text, r.oid, 'pg_catalog.pg_class'::regclass::text, t.oid, xc.relkind::text, xc.relname::text, d.deptype::text, d.refobjsubid::text FROM rels r JOIN pg_catalog.pg_class t ON t.oid = r.reltoastrelid JOIN pg_catalog.pg_index ix ON ix.indrelid = t.oid JOIN pg_catalog.pg_class xc ON xc.oid = ix.indexrelid LEFT JOIN pg_catalog.pg_depend d ON d.classid = 'pg_catalog.pg_class'::regclass AND d.objid = ix.indexrelid AND d.refclassid = 'pg_catalog.pg_class'::regclass AND d.refobjid = t.oid) SELECT i.item_kind, i.item_classid::text AS item_classid, i.item_oid, i.item_namespace_oid, i.group_classid, i.group_oid, i.related_classid, i.related_oid, i.subtype, i.name, i.edge_deptype, i.edge_ref_subid, (SELECT pg_catalog.count(*)::text FROM pg_catalog.pg_depend e WHERE e.classid = i.item_classid AND e.objid = i.item_oid AND e.refclassid = 'pg_catalog.pg_extension'::regclass AND e.deptype IN ('e', 'x')) AS extension_edges FROM items i ORDER BY i.item_kind, i.item_oid, i.group_oid, i.edge_deptype, i.edge_ref_subid, i.related_oid LIMIT 1001",
+    "params": [
+        "schema"
+    ],
+    "maxRows": 1000,
+    "columns": [
+        {
+            "name": "item_kind",
+            "type": "string",
+            "nullable": false
+        },
+        {
+            "name": "item_classid",
+            "type": "string",
+            "nullable": false
+        },
+        {
+            "name": "item_oid",
+            "type": "number",
+            "nullable": false
+        },
+        {
+            "name": "item_namespace_oid",
+            "type": "number",
+            "nullable": false
+        },
+        {
+            "name": "group_classid",
+            "type": "string",
+            "nullable": false
+        },
+        {
+            "name": "group_oid",
+            "type": "number",
+            "nullable": false
+        },
+        {
+            "name": "related_classid",
+            "type": "string",
+            "nullable": false
+        },
+        {
+            "name": "related_oid",
+            "type": "number",
+            "nullable": false
+        },
+        {
+            "name": "subtype",
+            "type": "string",
+            "nullable": false
+        },
+        {
+            "name": "name",
+            "type": "string",
+            "nullable": false
+        },
+        {
+            "name": "edge_deptype",
+            "type": "string",
+            "nullable": true
+        },
+        {
+            "name": "edge_ref_subid",
+            "type": "string",
+            "nullable": true
+        },
+        {
+            "name": "extension_edges",
+            "type": "string",
+            "nullable": false
+        }
+    ],
+    "limits": [
+        "Lists companion objects individually (constraints, triggers, view rules, column defaults, policies, owned sequences, TOAST and TOAST index CANDIDATES) of the relations of the target namespace. An item is identified by item_classid + item_oid; group_classid/group_oid are auxiliary grouping data and related_classid/related_oid name an object of a possibly different catalog. Edge-defined kinds (sequence_owner, toast_candidate, toast_index_candidate) emit one row per pg_depend edge with its own edge_deptype and edge_ref_subid (the owning or referenced column): serial sequences use 'a', identity sequences use 'i'; no edge folding. A NULL edge_deptype on an edge-defined kind is an anomaly for the consumer, never evidence of safety. TOAST objects are NOT classified as safe: a consumer may only accept one after verifying the pg_toast namespace, the internal ('i') edge to its relation, reltoastrelid correspondence and an allowed class. Items of classes not listed here, domain constraints and objects of unmapped classes are not enumerated: the consumer must account for every ev_closure row and treat the remainder as unresolved. extension_edges counts e/x edges. Truncation (row 1001) is incomplete. A failed or timed-out query is not an empty result."
+    ],
+    "class": "inventory"
+}),
+  entry({
+    "id": "ev_internal_edges",
+    "purpose": "internal edges",
+    "sql": "WITH scope AS (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = $1::name), addresses AS (SELECT 'pg_catalog.pg_class'::regclass AS classid, c.oid AS objid, c.relnamespace AS namespace, 'pg_catalog.pg_class'::regclass AS group_classid, c.oid AS group_oid FROM pg_catalog.pg_class c\nUNION ALL SELECT 'pg_catalog.pg_proc'::regclass, p.oid, p.pronamespace, 'pg_catalog.pg_proc'::regclass, p.oid FROM pg_catalog.pg_proc p\nUNION ALL SELECT 'pg_catalog.pg_type'::regclass, t.oid, t.typnamespace, CASE WHEN t.typrelid <> 0 THEN 'pg_catalog.pg_class'::regclass ELSE 'pg_catalog.pg_type'::regclass END, CASE WHEN t.typrelid <> 0 THEN t.typrelid ELSE t.oid END FROM pg_catalog.pg_type t\nUNION ALL SELECT 'pg_catalog.pg_constraint'::regclass, k.oid, k.connamespace, CASE WHEN k.conrelid <> 0 THEN 'pg_catalog.pg_class'::regclass ELSE 'pg_catalog.pg_type'::regclass END, CASE WHEN k.conrelid <> 0 THEN k.conrelid ELSE k.contypid END FROM pg_catalog.pg_constraint k\nUNION ALL SELECT 'pg_catalog.pg_trigger'::regclass, g.oid, c.relnamespace, 'pg_catalog.pg_class'::regclass, g.tgrelid FROM pg_catalog.pg_trigger g JOIN pg_catalog.pg_class c ON c.oid = g.tgrelid\nUNION ALL SELECT 'pg_catalog.pg_rewrite'::regclass, r.oid, c.relnamespace, 'pg_catalog.pg_class'::regclass, r.ev_class FROM pg_catalog.pg_rewrite r JOIN pg_catalog.pg_class c ON c.oid = r.ev_class\nUNION ALL SELECT 'pg_catalog.pg_attrdef'::regclass, a.oid, c.relnamespace, 'pg_catalog.pg_class'::regclass, a.adrelid FROM pg_catalog.pg_attrdef a JOIN pg_catalog.pg_class c ON c.oid = a.adrelid\nUNION ALL SELECT 'pg_catalog.pg_policy'::regclass, y.oid, c.relnamespace, 'pg_catalog.pg_class'::regclass, y.polrelid FROM pg_catalog.pg_policy y JOIN pg_catalog.pg_class c ON c.oid = y.polrelid\nUNION ALL SELECT 'pg_catalog.pg_collation'::regclass, x.oid, x.collnamespace, 'pg_catalog.pg_collation'::regclass, x.oid FROM pg_catalog.pg_collation x\nUNION ALL SELECT 'pg_catalog.pg_operator'::regclass, x.oid, x.oprnamespace, 'pg_catalog.pg_operator'::regclass, x.oid FROM pg_catalog.pg_operator x\nUNION ALL SELECT 'pg_catalog.pg_opclass'::regclass, x.oid, x.opcnamespace, 'pg_catalog.pg_opclass'::regclass, x.oid FROM pg_catalog.pg_opclass x\nUNION ALL SELECT 'pg_catalog.pg_opfamily'::regclass, x.oid, x.opfnamespace, 'pg_catalog.pg_opfamily'::regclass, x.oid FROM pg_catalog.pg_opfamily x\nUNION ALL SELECT 'pg_catalog.pg_extension'::regclass, x.oid, x.extnamespace, 'pg_catalog.pg_extension'::regclass, x.oid FROM pg_catalog.pg_extension x) SELECT DISTINCT s.classid::regclass::text AS source_classid, s.objid AS source_objid, d.objsubid AS source_subid, s.group_classid::regclass::text AS source_group_classid, s.group_oid AS source_group_oid, d.deptype::text AS deptype, d.refclassid::regclass::text AS ref_classid, d.refobjid AS ref_objid, d.refobjsubid AS ref_subid, t.group_classid::regclass::text AS ref_group_classid, t.group_oid AS ref_group_oid FROM addresses s JOIN scope sc ON sc.oid = s.namespace JOIN pg_catalog.pg_depend d ON d.classid = s.classid AND d.objid = s.objid JOIN addresses t ON t.classid = d.refclassid AND t.objid = d.refobjid AND t.namespace = sc.oid ORDER BY source_classid, source_objid, source_subid, deptype, ref_classid, ref_objid, ref_subid LIMIT 2001",
+    "params": [
+        "schema"
+    ],
+    "maxRows": 2000,
+    "columns": [
+        {
+            "name": "source_classid",
+            "type": "string",
+            "nullable": false
+        },
+        {
+            "name": "source_objid",
+            "type": "number",
+            "nullable": false
+        },
+        {
+            "name": "source_subid",
+            "type": "number",
+            "nullable": false
+        },
+        {
+            "name": "source_group_classid",
+            "type": "string",
+            "nullable": false
+        },
+        {
+            "name": "source_group_oid",
+            "type": "number",
+            "nullable": false
+        },
+        {
+            "name": "deptype",
+            "type": "string",
+            "nullable": false
+        },
+        {
+            "name": "ref_classid",
+            "type": "string",
+            "nullable": false
+        },
+        {
+            "name": "ref_objid",
+            "type": "number",
+            "nullable": false
+        },
+        {
+            "name": "ref_subid",
+            "type": "number",
+            "nullable": false
+        },
+        {
+            "name": "ref_group_classid",
+            "type": "string",
+            "nullable": false
+        },
+        {
+            "name": "ref_group_oid",
+            "type": "number",
+            "nullable": false
+        }
+    ],
+    "limits": [
+        "One row per dependency edge between mapped-class objects of the target namespace (no folding; deptype n/a/i/P/S/e/x kept, objsubid/refobjsubid preserved). Together with ev_outbound_references it partitions every pg_depend edge whose source is a mapped-class object of the namespace, except the edge to the namespace itself, which no query observes; this holds only inside one snapshot, not across separately executed statements. Edges to unmapped destination classes appear only in ev_outbound_references as unresolved. Sources of unmapped classes, TOAST objects (pg_toast), objects outside the namespace and dependencies not recorded in pg_depend are not covered. The edges do not by themselves define a linear removal order: cycles, auto and internal edges must be resolved by the consumer. Truncation (row 2001) is incomplete. A failed or timed-out query is not an empty result."
+    ],
+    "class": "dependency"
+}),
 ]);
 // Closed literals include MEMBER/SET only as membership data, never statements.
-const LITERALS = Object.freeze(["", "/", ":", "MEMBER", "P", "S", "SET", "UTF8", "^pg_(temp_|toast_temp_)", "a", "advisory", "agenda_test_app", "attrdef", "class", "constraint", "default_acl", "e", "event_trigger", "extension", "hex", "i", "idle_in_transaction_session_timeout", "index", "information_schema", "lock_timeout", "n", "namespace", "pg_catalog", "pg_catalog.pg_attrdef", "pg_catalog.pg_class", "pg_catalog.pg_collation", "pg_catalog.pg_constraint", "pg_catalog.pg_conversion", "pg_catalog.pg_extension", "pg_catalog.pg_namespace", "pg_catalog.pg_opclass", "pg_catalog.pg_operator", "pg_catalog.pg_opfamily", "pg_catalog.pg_proc", "pg_catalog.pg_rewrite", "pg_catalog.pg_statistic_ext", "pg_catalog.pg_trigger", "pg_catalog.pg_ts_config", "pg_catalog.pg_ts_dict", "pg_catalog.pg_ts_parser", "pg_catalog.pg_ts_template", "pg_catalog.pg_type", "pg_namespace", "pg_toast", "policy", "proc", "rule", "sequence", "server_version_num", "statement_timeout", "transaction_isolation", "transaction_read_only", "trigger", "type"]);
+const LITERALS = Object.freeze(["", "/", ":", "MEMBER", "P", "S", "SET", "UTF8", "^pg_(temp_|toast_temp_)", "a", "advisory", "agenda_test_app", "attrdef", "class", "constraint", "default_acl", "e", "event_trigger", "extension", "hex", "i", "idle_in_transaction_session_timeout", "index", "information_schema", "lock_timeout", "n", "namespace", "pg_catalog", "pg_catalog.pg_attrdef", "pg_catalog.pg_class", "pg_catalog.pg_collation", "pg_catalog.pg_constraint", "pg_catalog.pg_conversion", "pg_catalog.pg_extension", "pg_catalog.pg_namespace", "pg_catalog.pg_opclass", "pg_catalog.pg_operator", "pg_catalog.pg_opfamily", "pg_catalog.pg_policy", "pg_catalog.pg_proc", "pg_catalog.pg_rewrite", "pg_catalog.pg_statistic_ext", "pg_catalog.pg_trigger", "pg_catalog.pg_ts_config", "pg_catalog.pg_ts_dict", "pg_catalog.pg_ts_parser", "pg_catalog.pg_ts_template", "pg_catalog.pg_type", "pg_namespace", "pg_toast", "policy", "proc", "rule", "sequence", "sequence_owner", "server_version_num", "statement_timeout", "toast_candidate", "toast_index_candidate", "transaction_isolation", "transaction_read_only", "trigger", "type", "x"]);
 const ALLOWED_FUNCTIONS = Object.freeze(["aclexplode", "coalesce", "convert_to", "count", "current_database", "current_setting", "encode", "json_build_array", "obj_description", "pg_backend_pid", "pg_get_userbyid", "pg_has_role", "pg_is_in_recovery", "sha256", "string_agg", "strpos"]);
 const ALLOWED_RELATIONS = Object.freeze(["pg_attrdef", "pg_class", "pg_collation", "pg_constraint", "pg_conversion", "pg_database", "pg_default_acl", "pg_depend", "pg_event_trigger", "pg_extension", "pg_index", "pg_locks", "pg_namespace", "pg_opclass", "pg_operator", "pg_opfamily", "pg_policy", "pg_prepared_xacts", "pg_proc", "pg_rewrite", "pg_roles", "pg_stat_activity", "pg_statistic_ext", "pg_trigger", "pg_ts_config", "pg_ts_dict", "pg_ts_parser", "pg_ts_template", "pg_type"]);
 const CASTS = Object.freeze(['name', 'oid', 'text', 'bigint', 'regclass']);
