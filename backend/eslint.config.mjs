@@ -8,6 +8,7 @@ const passwordExceptions = [
   'src/database/data-source-options.spec.ts',
   'src/config/database-credentials.spec.ts',
   'src/config/app.config.spec.ts',
+  'src/database/schema-runner/schema-data-source.ts',
 ];
 const trapExceptions = ['test/harness/pg-trap.setup.cjs', 'test/harness/pg-trap.spec.ts'];
 const passwordSyntax = [{

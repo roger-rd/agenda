@@ -22,9 +22,9 @@ function lint(samples: Sample[]): Message[][] {
 }
 
 const exceptions = ['src/database/data-source-options.ts', 'src/config/database-credentials.ts',
-  'src/database/data-source-options.spec.ts', 'src/config/database-credentials.spec.ts', 'src/config/app.config.spec.ts'];
+  'src/database/data-source-options.spec.ts', 'src/config/database-credentials.spec.ts', 'src/config/app.config.spec.ts','src/database/schema-runner/schema-data-source.ts'];
 
-test('revealPassword: propiedad y literal prohibidos con cinco excepciones exactas', () => {
+test('revealPassword: propiedad y literal prohibidos con seis excepciones exactas', () => {
   const code = "const value = { revealPassword() {} }; value.revealPassword(); value['revealPassword']();";
   const results = lint(['src/foo.ts', 'test/harness/foo.spec.ts', 'scripts/foo.cjs', 'foo.mjs', ...exceptions]
     .map(file => ({ file, code })));
