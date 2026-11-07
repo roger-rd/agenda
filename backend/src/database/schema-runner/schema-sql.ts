@@ -102,6 +102,14 @@ ORDER BY t.name, p.privilege`;
 /** One boolean per business table: true when it has no rows. Built once from the frozen table list. */
 export const TABLES_EMPTY_SQL = `SELECT ${TABLE_ORDER.map(t => `NOT EXISTS (SELECT 1 FROM "public"."${t}") AS "${t}"`).join(', ')}`;
 
+/**
+ * Revert only. Taken right after BEGIN, before the emptiness check, and held until COMMIT or ROLLBACK: it stops every
+ * other session (cooperative or not) from writing to, or reading, the eight tables while they are checked and dropped.
+ * ACCESS EXCLUSIVE from the start, so the later DROP TABLE never has to upgrade a weaker lock. Same fixed order as the
+ * migration; $-free, built only from the frozen table list. lock_timeout (5 s) makes it fail instead of waiting.
+ */
+export const TABLE_LOCK_SQL = `LOCK TABLE ${TABLE_ORDER.map(t => `"${TARGET.schema}"."${t}"`).join(', ')} IN ACCESS EXCLUSIVE MODE`;
+
 export const LOCK_SQL = 'SELECT pg_try_advisory_lock($1::bigint) AS locked';
 export const UNLOCK_SQL = 'SELECT pg_advisory_unlock($1::bigint) AS unlocked';
 
@@ -130,7 +138,8 @@ export const READ_ONLY_QUERIES = Object.freeze({
 });
 export const LOCK_STATEMENTS = Object.freeze({ LOCK_SQL, UNLOCK_SQL });
 export const CONTROL_STATEMENTS = Object.freeze({ BEGIN_READ_ONLY_SQL, ROLLBACK_SQL });
+export const TABLE_LOCK_STATEMENTS = Object.freeze({ TABLE_LOCK_SQL });
 export const WRITE_STATEMENTS = Object.freeze({ REVOKE_MIGRATIONS_TABLE_SQL, REVOKE_MIGRATIONS_SEQUENCE_SQL });
 export const ALL_STATEMENTS: Readonly<Record<string, string>> = Object.freeze({
-  ...READ_ONLY_QUERIES, ...LOCK_STATEMENTS, ...CONTROL_STATEMENTS, ...WRITE_STATEMENTS,
+  ...READ_ONLY_QUERIES, ...LOCK_STATEMENTS, ...CONTROL_STATEMENTS, ...TABLE_LOCK_STATEMENTS, ...WRITE_STATEMENTS,
 });

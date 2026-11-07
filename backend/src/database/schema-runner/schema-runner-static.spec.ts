@@ -6,14 +6,17 @@ import { join } from 'node:path';
  * and no driver here, so nothing can open a connection, write a file or run migrations.
  */
 const dir = __dirname;
-const sources = readdirSync(dir).filter(f => f.endsWith('.ts') && !f.endsWith('.spec.ts')).sort();
+const all = readdirSync(dir).filter(f => f.endsWith('.ts') && !f.endsWith('.spec.ts')).sort();
+/** F1.2b-1 modules: pure or protected configuration. The F1.2b-2 modules (runner, session, CLI) have their own static spec. */
+const sources = all.filter(f => !['schema-runner.ts', 'typeorm-session.ts', 'cli.ts'].includes(f));
 const text = (file: string) => readFileSync(join(dir, file), 'utf8');
 const code = (file: string) => text(file).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 const REVEAL = new RegExp(`\\.${'reveal'}${'Password'}\\(`);
 
 describe('módulos del runner de esquema (F1.2b-1)', () => {
-  it('son exactamente cinco, sin ejecutor, sin sesión y sin línea de órdenes', () => {
+  it('son exactamente cinco; los únicos módulos adicionales son el ejecutor, la sesión TypeORM y la línea de órdenes de F1.2b-2', () => {
     expect(sources).toEqual(['credential-file.ts', 'schema-data-source.ts', 'schema-guards.ts', 'schema-sql.ts', 'schema-target.ts']);
+    expect(all).toEqual(['cli.ts', 'credential-file.ts', 'schema-data-source.ts', 'schema-guards.ts', 'schema-runner.ts', 'schema-sql.ts', 'schema-target.ts', 'typeorm-session.ts']);
   });
 
   it('no abren conexiones, procesos, red ni escriben archivos', () => {

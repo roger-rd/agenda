@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { TABLE_ORDER } from '../migrations/initial-schema.statements';
 import {
   ALL_STATEMENTS, APPLICATION_PRIVILEGES_SQL, CONTROL_STATEMENTS, LOCK_STATEMENTS, MIGRATIONS_PRIVILEGES_SQL, READ_ONLY_QUERIES,
-  REVOKE_MIGRATIONS_SEQUENCE_SQL, REVOKE_MIGRATIONS_TABLE_SQL, TABLES_EMPTY_SQL, TRANSACTION_CLOSED_SQL, WRITE_STATEMENTS,
+  REVOKE_MIGRATIONS_SEQUENCE_SQL, REVOKE_MIGRATIONS_TABLE_SQL, TABLE_LOCK_SQL, TABLES_EMPTY_SQL, TRANSACTION_CLOSED_SQL, WRITE_STATEMENTS, TABLE_LOCK_STATEMENTS,
 } from './schema-sql';
 
 const PINNED: Record<string, string> = {
@@ -14,6 +14,7 @@ const PINNED: Record<string, string> = {
   MIGRATIONS_PRIVILEGES_SQL: 'b3d103bb65732edbcd333c8a987bc6accda6d9c377d30f773954dae75d7664e4',
   MIGRATIONS_ACL_SQL: '0c4024aa2bbab0516ea2f577255444c31273d476872f4c9d38e981b81a3730e7',
   APPLICATION_PRIVILEGES_SQL: '2022924dee1bd314c56e380d1a2a06a655afd2440a1eddbebbdfe09a0a8c5b23',
+  TABLE_LOCK_SQL: '925cd78dcad020c20d2a07d4a1601fb6ea1e6398649ffda07bcfbd0691b23621',
   TABLES_EMPTY_SQL: '7686c52620904d3b565b7204224ce872c9f07a4ddd4d69d17d49cac4dcc16a7d',
   TRANSACTION_CLOSED_SQL: '4208bee0ecb74d59b05be68655723663cd1bfd1ecbf374410e98da9670cc1a7e',
   LOCK_SQL: '3c0bda1b9a8fefaea0108077aa3182c999667daef4d5358cd1d764d69b026bb0',
@@ -73,6 +74,18 @@ describe('SQL fijado del runner de esquema', () => {
     const columns = [...TABLES_EMPTY_SQL.matchAll(/AS "([a-z_]+)"/g)].map(m => m[1]);
     expect(columns).toEqual([...TABLE_ORDER]);
     for (const table of TABLE_ORDER) expect(TABLES_EMPTY_SQL).toContain(`NOT EXISTS (SELECT 1 FROM "public"."${table}")`);
+  });
+
+  it('G. el bloqueo de revert: ACCESS EXCLUSIVE sobre las ocho tablas, calificadas, una vez cada una y en el orden fijo', () => {
+    expect(TABLE_LOCK_SQL).toBe(`LOCK TABLE ${TABLE_ORDER.map(t => `"public"."${t}"`).join(', ')} IN ACCESS EXCLUSIVE MODE`);
+    const quoted = [...TABLE_LOCK_SQL.matchAll(/"public"\."([a-z_]+)"/g)].map(m => m[1]);
+    expect(quoted).toEqual([...TABLE_ORDER]);
+    expect(new Set(quoted).size).toBe(8);
+    expect(TABLE_LOCK_SQL.endsWith(' IN ACCESS EXCLUSIVE MODE')).toBe(true);
+    expect(TABLE_LOCK_SQL).not.toMatch(/;|NOWAIT|\bSHARE\b|\bROW\b|schema_migrations|\bONLY\b|\$/);
+    expect(TABLE_LOCK_SQL.startsWith('LOCK TABLE ')).toBe(true);
+    expect(Object.values(READ_ONLY_QUERIES)).not.toContain(TABLE_LOCK_SQL);
+    expect(Object.values(TABLE_LOCK_STATEMENTS)).toEqual([TABLE_LOCK_SQL]);
   });
 
   it('el rol y las tablas viajan como parámetros, nunca interpolados en las consultas', () => {
