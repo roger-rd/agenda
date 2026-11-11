@@ -1,12 +1,13 @@
 import 'reflect-metadata';
+import { ConstraintRegistry } from './database/errors/constraint-registry';
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from './database/database.module';
 
-@Module({})
+@Module({ providers: [ConstraintRegistry], exports: [ConstraintRegistry] })
 class TestDatabaseModule {}
 import { Test } from '@nestjs/testing';
 
-import { setupHttpLogging } from './logging/setup-http-logging';
+import { configureHttpApp } from './common/http/configure-http-app';
 
 const originalEnv = { ...process.env };
 beforeAll(() => {
@@ -24,7 +25,7 @@ describe('AppModule', () => {
 
     const app = moduleRef.createNestApplication();
     try {
-      await setupHttpLogging(app);
+      await configureHttpApp(app);
       await app.init();
       expect(moduleRef).toBeDefined();
       expect(app).toBeDefined();

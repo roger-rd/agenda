@@ -3,7 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { PinoLogger } from 'nestjs-pino';
 import { AppConfigService } from './config/app-config.service';
 import { startupErrorMessage } from './startup-error';
-import { setupHttpLogging } from './logging/setup-http-logging';
+import { configureHttpApp } from './common/http/configure-http-app';
 import { createBootstrapLogger } from './logging/safe-logging';
 import { installFatalHandlers } from './logging/fatal-handlers';
 
@@ -12,7 +12,7 @@ async function bootstrap(): Promise<void> {
   // La importación diferida permite capturar también errores de ConfigModule.forRoot.
   const { AppModule } = await import('./app.module');
   const app = await NestFactory.create(AppModule, { bufferLogs: true, autoFlushLogs: false, abortOnError: false });
-  await setupHttpLogging(app);
+  await configureHttpApp(app);
   app.flushLogs();
   app.enableShutdownHooks();
   const config = app.get(AppConfigService);

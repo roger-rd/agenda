@@ -9,7 +9,7 @@ import { pino } from 'pino';
 import { InvalidInputError } from '../common/errors/domain-error';
 import { DatabaseCredentials, DatabaseConnectionConfig } from '../config/database-credentials';
 import { createLoggerOptions, serializeRequest, serializeResponse } from './logger-options';
-import { SENSITIVE_LOG_KEYS, sanitizeError, sanitizeLogObject, resolveDescriptor, safeContext, registerSafeSerializer, framesOnly } from './error-sanitizer';
+import { extractDatabaseFields, SENSITIVE_LOG_KEYS, sanitizeError, sanitizeLogObject, resolveDescriptor, safeContext, registerSafeSerializer, framesOnly } from './error-sanitizer';
 import { registerSecret, resetSecretsForTests } from './secret-registry';
 afterEach(() => { jest.restoreAllMocks(); resetSecretsForTests(); });
 function database(code = '23505') {
@@ -320,4 +320,12 @@ it('extractDatabaseFields comparte lista blanca y databaseVerb nunca devuelve SQ
   const get = jest.fn(() => { throw new Error('CANARIO_GET'); });
   expect(databaseVerb(Object.defineProperty({}, 'query', { get }))).toBeUndefined();
   expect(extractDatabaseFields(Object.defineProperty({}, 'driverError', { get }))).toEqual({}); expect(get).not.toHaveBeenCalled();
+});
+
+it('constraint conserva mayúsculas sin ampliar table/column/schema', () => {
+  expect(extractDatabaseFields({ code: '23505', constraint: 'UQ_users_email', table: 'Users', column: 'Email', schema: 'Public' }))
+    .toEqual({ sqlState: '23505', constraint: 'UQ_users_email' });
+});
+it.each(['UQ_bad-name', 'UQ bad', 'A'.repeat(64), 'UQ_bad\n'])('descarta constraint inválido %s', constraint => {
+  expect(extractDatabaseFields({ constraint })).not.toHaveProperty('constraint');
 });

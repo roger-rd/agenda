@@ -123,7 +123,7 @@ export function extractDatabaseFields(value: unknown): DatabaseFields {
   if (valid(sqlState, /^[0-9A-Z]{5}$/)) result.sqlState = sqlState;
   for (const key of ['constraint', 'table', 'column', 'schema', 'routine', 'severity'] as const) {
     const field = own(driver, key);
-    const pattern = key === 'severity' ? /^(ERROR|FATAL|PANIC)$/ : key === 'routine' ? /^[A-Za-z0-9_]{1,64}$/ : /^[a-z0-9_]{1,63}$/;
+    const pattern = key === 'severity' ? /^(ERROR|FATAL|PANIC)$/ : key === 'constraint' ? /^[A-Za-z0-9_]{1,63}$/ : key === 'routine' ? /^[A-Za-z0-9_]{1,64}$/ : /^[a-z0-9_]{1,63}$/;
     if (valid(field, pattern)) result[key] = field;
   }
   return result;

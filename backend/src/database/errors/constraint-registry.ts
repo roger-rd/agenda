@@ -25,8 +25,8 @@ export class ConstraintRegistry {
     if (entry.kind === 'not_null') {
       if (!matches(entry.table, identifier) || !matches(entry.column, identifier)) fail();
     } else {
-      if (!matches(entry.name, /^(pk|fk|uq|ck|ix)_[a-z0-9_]{1,59}$(?![\s\S])/)) fail();
-      const prefixes = entry.kind === 'unique' ? ['uq_', 'pk_'] : entry.kind === 'check' ? ['ck_'] : ['fk_'];
+      if (!matches(entry.name, /^(pk|fk|uq|ck|ix|PK|FK|UQ|CK|IX)_[A-Za-z0-9_]{1,59}$(?![\s\S])/)) fail();
+      const prefixes = entry.kind === 'unique' ? ['uq_', 'pk_', 'UQ_', 'PK_'] : entry.kind === 'check' ? ['ck_', 'CK_'] : ['fk_', 'FK_'];
       if (!prefixes.some(prefix => (entry.name as string).startsWith(prefix))) fail();
     }
     if (entry.kind === 'foreign_key') {

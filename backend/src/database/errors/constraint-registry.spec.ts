@@ -22,3 +22,13 @@ it('rechaza duplicados y limita a 500 entradas', () => {
   for (let i = 1; i < 500; i++) r.register({ ...unique, name: `uq_${i}` });
   expect(r.size).toBe(500); expect(() => r.register({ ...unique, name: 'uq_extra' })).toThrow();
 });
+
+it('acepta nombres reales y busca sin normalizar capitalización', () => {
+  const registry = new ConstraintRegistry();
+  registry.register({ ...unique, name: 'UQ_users_email' });
+  expect(registry.unique('UQ_users_email')?.field).toBe('email');
+  expect(registry.unique('uq_users_email')).toBeUndefined();
+  registry.register({ kind: 'check', name: 'CK_posts_title', origin: 'input', code: 'invalid_input', field: 'title', message: 'Título inválido.' });
+  expect(registry.check('CK_posts_title')).toBeDefined();
+  expect(registry.check('ck_posts_title')).toBeUndefined();
+});
