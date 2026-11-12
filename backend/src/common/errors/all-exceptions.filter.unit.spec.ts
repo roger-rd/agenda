@@ -14,6 +14,15 @@ function invoke(error: unknown) {
 }
 
 describe('Contrato del filtro sin sockets', () => {
+  it('expone saturación con Retry-After y requestId', () => {
+    const error = new ServiceUnavailableError(undefined, 1);
+    const { response, body } = invoke(error);
+    expect(response.status).toHaveBeenCalledWith(503);
+    expect(response.setHeader).toHaveBeenCalledWith('Retry-After', '1');
+    expect(isUuidV7(body.error.requestId)).toBe(true);
+    expect(response.setHeader).toHaveBeenCalledWith('X-Request-Id', body.error.requestId);
+    expect(body).toEqual({ error: { code: 'service_unavailable', message: error.message, requestId: body.error.requestId } });
+  });
   it.each([
     [new InvalidInputError('Entrada incorrecta.', 'title'), 400, 'invalid_input'],
     [new NotFoundError(), 404, 'not_found'], [new ForbiddenError(), 403, 'forbidden'],
