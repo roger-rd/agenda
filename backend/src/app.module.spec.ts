@@ -1,3 +1,6 @@
+import { RegistrationController } from './registration/registration.controller';
+import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { RequestMethod } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { TransactionRunner } from './registration/transaction-runner';
 import { RegistrationService } from './registration/registration.service';
@@ -40,6 +43,10 @@ describe('AppModule', () => {
       await configureHttpApp(app);
       await app.init();
       expect(moduleRef.get(RegistrationService)).toBeInstanceOf(RegistrationService);
+      expect(moduleRef.get(RegistrationController)).toBeInstanceOf(RegistrationController);
+      expect(Reflect.getMetadata(PATH_METADATA, RegistrationController)).toBe('auth');
+      expect(Reflect.getMetadata(PATH_METADATA, RegistrationController.prototype.register)).toBe('register');
+      expect(Reflect.getMetadata(METHOD_METADATA, RegistrationController.prototype.register)).toBe(RequestMethod.POST);
       expect(app).toBeDefined();
     } finally {
       await app.close();

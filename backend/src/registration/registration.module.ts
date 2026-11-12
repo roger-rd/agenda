@@ -1,3 +1,4 @@
+import { RegistrationController } from './registration.controller';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { IdentityModule } from '../identity/identity.module';
@@ -9,6 +10,7 @@ import { DataSourceTransactionRunner, TransactionRunner } from './transaction-ru
 
 @Module({
   imports: [IdentityModule, TypeOrmModule.forFeature([User, Organization, OrganizationMembership])],
+  controllers: [RegistrationController],
   providers: [RegistrationService, { provide: TransactionRunner, useClass: DataSourceTransactionRunner },
     { provide: REGISTRATION_NOW, useValue: () => new Date() },
     { provide: REGISTRATION_NORMALIZERS, useValue: registrationNormalizers }],
