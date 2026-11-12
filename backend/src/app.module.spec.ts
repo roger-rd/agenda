@@ -1,3 +1,9 @@
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { TransactionRunner } from './registration/transaction-runner';
+import { RegistrationService } from './registration/registration.service';
+import { User } from './persistence/entities/user.entity';
+import { Organization } from './persistence/entities/organization.entity';
+import { OrganizationMembership } from './persistence/entities/organization-membership.entity';
 import 'reflect-metadata';
 import { ConstraintRegistry } from './database/errors/constraint-registry';
 import { Module } from '@nestjs/common';
@@ -21,13 +27,19 @@ describe('AppModule', () => {
     const { AppModule } = await import('./app.module');
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).overrideModule(DatabaseModule).useModule(TestDatabaseModule).compile();
+    }).overrideModule(DatabaseModule).useModule(TestDatabaseModule)
+      // forFeature registra repositorios; reemplazarlos junto al runner evita necesitar DataSource.
+      .overrideProvider(TransactionRunner).useValue({ run: jest.fn() })
+      .overrideProvider(getRepositoryToken(User)).useValue({})
+      .overrideProvider(getRepositoryToken(Organization)).useValue({})
+      .overrideProvider(getRepositoryToken(OrganizationMembership)).useValue({})
+      .compile();
 
     const app = moduleRef.createNestApplication();
     try {
       await configureHttpApp(app);
       await app.init();
-      expect(moduleRef).toBeDefined();
+      expect(moduleRef.get(RegistrationService)).toBeInstanceOf(RegistrationService);
       expect(app).toBeDefined();
     } finally {
       await app.close();

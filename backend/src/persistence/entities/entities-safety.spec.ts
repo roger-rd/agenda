@@ -2,6 +2,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { inspect } from 'node:util';
 import { DataSource, type EntityMetadata } from 'typeorm';
+import * as ts from 'typescript';
+import { Organization } from './organization.entity';
+import { OrganizationMembership } from './organization-membership.entity';
 import { ENTITIES, User, UserSession } from './index';
 import { SERVICE_ENFORCED, SQL_ENFORCED } from '../invariants';
 import { POST_FORMATS, POST_STATUSES, ROLES } from '../constants';
@@ -50,15 +53,79 @@ describe('invariantes documentadas frente a las reglas de servicio', () => {
   });
 });
 
-describe('las entidades no están activadas', () => {
+describe('activación controlada de las entidades de registro', () => {
   const sources = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
     const full = path.join(dir, entry.name);
     return entry.isDirectory() ? sources(full) : entry.name.endsWith('.ts') ? [full] : [];
   });
-  it('ningún archivo fuera de persistence las importa', () => {
-    const outside = sources(backendSrc).filter(file => !file.startsWith(path.join(backendSrc, 'persistence')));
+  it('solo los archivos autorizados importan las tres entidades de registro desde persistence', () => {
+    const allowedFiles = [
+      'registration/registration.module.ts',
+      'registration/registration.service.ts',
+      'registration/registration.service.spec.ts',
+      'app.module.spec.ts',
+    ];
+    const allowedEntities: Record<string, string> = {
+      'persistence/entities/user.entity': 'User',
+      'persistence/entities/organization.entity': 'Organization',
+      'persistence/entities/organization-membership.entity': 'OrganizationMembership',
+    };
+    const outside = sources(backendSrc).filter(file => !file.startsWith(path.join(backendSrc, 'persistence') + path.sep));
     expect(outside.length).toBeGreaterThan(10);
-    for (const file of outside) expect([file, /from\s+['"][^'"]*persistence/.test(read(file))]).toEqual([file, false]);
+    const actualFiles = new Set<string>();
+    for (const file of outside) {
+      const relativeFile = path.relative(backendSrc, file).split(path.sep).join('/');
+      const source = ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true);
+      const visit = (node: ts.Node): void => {
+        // Incluye imports estáticos, reexports, require e import dinámico; solo
+        // se autorizan imports nombrados estáticos de los tres archivos exactos.
+        if (ts.isStringLiteralLike(node) && /(^|\/)persistence(\/|$)/.test(node.text)) {
+          actualFiles.add(relativeFile);
+          expect(allowedFiles).toContain(relativeFile);
+          const target = path.relative(backendSrc, path.resolve(path.dirname(file), node.text)).split(path.sep).join('/');
+          expect(Object.keys(allowedEntities)).toContain(target);
+          const declaration = node.parent;
+          expect(ts.isImportDeclaration(declaration)).toBe(true);
+          if (!ts.isImportDeclaration(declaration)) return;
+          expect(declaration.moduleSpecifier).toBe(node);
+          expect(declaration.importClause?.name).toBeUndefined();
+          const bindings = declaration.importClause?.namedBindings;
+          expect(bindings && ts.isNamedImports(bindings)).toBe(true);
+          if (!bindings || !ts.isNamedImports(bindings)) return;
+          expect(bindings.elements.length).toBeGreaterThan(0);
+          for (const element of bindings.elements) {
+            expect((element.propertyName ?? element.name).text).toBe(allowedEntities[target]);
+          }
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+    }
+    for (const file of allowedFiles) {
+      expect(fs.statSync(path.join(backendSrc, file)).isFile()).toBe(true);
+    }
+    // Una excepción inexistente o que ya no importe entidades también falla.
+    expect([...actualFiles].sort()).toEqual([...allowedFiles].sort());
+  });
+  it('las tres entidades de registro resuelven sus FK sin conexión ni entidades extra', async () => {
+    const entities = [User, Organization, OrganizationMembership];
+    const source = new DataSource({ type: 'postgres', entities, synchronize: false });
+    // Mismo mecanismo local del beforeAll: no llama initialize ni abre conexiones.
+    await (source as unknown as { buildMetadatas(): Promise<void> }).buildMetadatas();
+    expect(source.isInitialized).toBe(false);
+    expect(source.entityMetadatas.map(metadata => metadata.target)).toEqual(expect.arrayContaining(entities));
+    expect(source.entityMetadatas).toHaveLength(3);
+    const membership = source.getMetadata(OrganizationMembership);
+    expect(membership.foreignKeys.map(fk => [fk.name, fk.referencedEntityMetadata.tableName]).sort()).toEqual([
+      ['FK_organization_memberships_organization', 'organizations'],
+      ['FK_organization_memberships_user', 'users'],
+    ]);
+    const references = source.entityMetadatas.flatMap(metadata => metadata.foreignKeys);
+    expect(references).toHaveLength(2);
+    for (const fk of references) expect(entities).toContain(fk.referencedEntityMetadata.target);
+    for (const metadata of source.entityMetadatas) {
+      for (const relation of metadata.relations) expect(entities).toContain(relation.inverseEntityMetadata.target);
+    }
   });
   it('el DataSource de la aplicación conserva entities vacío y migrations vacío, y la barrera sigue intacta', () => {
     const source = read(path.join(backendSrc, 'database/data-source-options.ts'));

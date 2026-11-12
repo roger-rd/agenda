@@ -1,3 +1,4 @@
+import { RegistrationModule } from './registration/registration.module';
 import { IdentityModule } from './identity/identity.module';
 import { HealthModule } from './health/health.module';
 import { ConstraintRegistry } from './database/errors/constraint-registry';
@@ -11,7 +12,7 @@ import { AllExceptionsFilter } from './common/errors/all-exceptions.filter';
 import { LoggingModule } from './logging/logging.module';
 
 @Module({
-  imports: [IdentityModule, AppConfigModule, IdsModule, LoggingModule, DatabaseModule, HealthModule],
+  imports: [RegistrationModule, IdentityModule, AppConfigModule, IdsModule, LoggingModule, DatabaseModule, HealthModule],
   providers: [{ provide: 'SCHEMA_CONSTRAINTS_REGISTERED', inject: [ConstraintRegistry], useFactory: registerSchemaConstraints }, { provide: APP_FILTER, useClass: AllExceptionsFilter }],
 })
 export class AppModule {}
