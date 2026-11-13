@@ -1,3 +1,4 @@
+import { registerHttpTest } from './http-register';
 import { Test, TestingModule } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import { DataSource, EntityManager, type Logger } from 'typeorm';
@@ -18,7 +19,7 @@ import { classifyDatabaseError } from '../../../src/database/errors/database-fai
 import { DatabaseOperationError } from '../../../src/database/errors/database-operation-error';
 import { normalizePersonName, organizationNameKey } from '../../../src/identity/person-name';
 import { normalizeEmail } from '../../../src/identity/email';
-import { DeleteGate, markers, runId, validateRunId } from './markers';
+import { DeleteGate, httpCleanupSQL, httpCleanupTargets, markers, runId, validateRunId } from './markers';
 import { accepted, checkRejected, columnTypeRejected, collisions, distinct, normalizerRejected } from './unicode-cases';
 import type { Phase } from './phase';
 import { assertFingerprint, businessFingerprint, migrationFingerprint, fingerprintSQL } from './schema-fingerprint';
@@ -36,6 +37,7 @@ const failure = (error: unknown) => error instanceof DatabaseOperationError ? er
 export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
   describe(`B2B ${phase}`, () => {
     const id = runId(), gate = new DeleteGate(phase), saved: RegistrationResult[] = [];
+    const httpTargets = phase === 'http' ? httpCleanupTargets(id) : undefined;
     let observer: DataSource | undefined, source: DataSource, app: INestApplication | undefined, moduleRef: TestingModule | undefined;
     let service: RegistrationService, sequence = 0, ready = false;
     let migrationHistory: MigrationHistory = 'unverified';
@@ -55,14 +57,23 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
     async function cleanup(): Promise<void> {
       gate.assertArmed(); validateRunId(id);
       const userIds = saved.map(r => r.user.id), orgIds = saved.map(r => r.organization.id);
-      // First saved ids, then bounded run markers. Only these three tables, always WHERE.
+      // First saved ids, then exact HTTP reservations or DML run patterns. Always WHERE.
+      if (httpTargets) {
+        await observer!.query('DELETE FROM public.organization_memberships WHERE id = ANY($1::uuid[])', [saved.map(r => r.membership.id)]);
+      }
       await observer!.query('DELETE FROM public.organization_memberships WHERE user_id = ANY($1::uuid[]) OR organization_id = ANY($2::uuid[])', [userIds, orgIds]);
       await observer!.query('DELETE FROM public.users WHERE id = ANY($1::uuid[])', [userIds]);
       await observer!.query('DELETE FROM public.organizations WHERE id = ANY($1::uuid[])', [orgIds]);
-      const emailPattern = `^b2b-${id}-[0-9]+@agenda-b2b[.]test$`, orgPattern = `B2B-${id}-%`;
-      await observer!.query('DELETE FROM public.organization_memberships WHERE user_id IN (SELECT id FROM public.users WHERE email ~ $1) OR organization_id IN (SELECT id FROM public.organizations WHERE name LIKE $2)', [emailPattern, orgPattern]);
-      await observer!.query('DELETE FROM public.users WHERE email ~ $1', [emailPattern]);
-      await observer!.query('DELETE FROM public.organizations WHERE name LIKE $1', [orgPattern]);
+      if (httpTargets) {
+        await observer!.query(httpCleanupSQL.memberships, [httpTargets.emails, httpTargets.organizationNames]);
+        await observer!.query(httpCleanupSQL.users, [httpTargets.emails]);
+        await observer!.query(httpCleanupSQL.organizations, [httpTargets.organizationNames]);
+      } else {
+        const emailPattern = `^b2b-${id}-[0-9]+@agenda-b2b[.]test$`, orgPattern = `B2B-${id}-%`;
+        await observer!.query('DELETE FROM public.organization_memberships WHERE user_id IN (SELECT id FROM public.users WHERE email ~ $1) OR organization_id IN (SELECT id FROM public.organizations WHERE name LIKE $2)', [emailPattern, orgPattern]);
+        await observer!.query('DELETE FROM public.users WHERE email ~ $1', [emailPattern]);
+        await observer!.query('DELETE FROM public.organizations WHERE name LIKE $1', [orgPattern]);
+      }
       await empty();
     }
     async function register(value: ReturnType<typeof input>, target = service): Promise<RegistrationResult> {
@@ -160,12 +171,13 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
         console.info(`[b2b] preflight completado: migrationHistory=${migrationHistory}`);
       } catch (error) { await close(); throw error; }
     });
-    if (phase === 'dml') {
+    if (phase === 'dml' || phase === 'http') {
       afterAll(async () => { try { if (gate.isArmed && observer?.isInitialized) await cleanup(); } finally { await close(); } });
     } else {
       afterAll(close); // readonly never registers a cleanup hook.
     }
     test('preflight y AppModule reales', () => expect(ready).toBe(true));
+    if (phase === 'http') registerHttpTest(() => ({ app: app!, observer: observer!, gate, saved, id, ready, counts, credentials: input('http') }));
     if (phase === 'dml') {
       test('registro, rollback, concurrencia y equivalencia Unicode', async () => {
         expect(ready).toBe(true);

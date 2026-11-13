@@ -1,9 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { registerConnectedSuite, loadedDatabaseModules } from './support/load-connected.cjs';
 import { assertFingerprint, businessFingerprint, migrationFingerprint, fingerprintSQL } from './support/schema-fingerprint';
 import { classifyMigrationHistory } from './support/migration-history';
 import { parsePhase, phaseEnvironment } from './support/phase';
 import { assertReadonlyQuery, guardedQuery } from './support/readonly';
-import { DeleteGate, markers, runId, validateRunId } from './support/markers';
+import { DeleteGate, httpCleanupSQL, httpCleanupTargets, httpMarkers, markers, runId, validateRunId } from './support/markers';
 import { normalizerRejected, checkRejected, columnTypeRejected, collisions, distinct } from './support/unicode-cases';
 import { normalizePersonName, organizationNameKey } from '../../src/identity/person-name';
 
@@ -63,7 +65,7 @@ if (phase === 'offline') {
       expect(() => parsePhase('cleanup', 'test')).toThrow('fase cleanup requiere autorización específica');
       expect(() => parsePhase('offline', 'development')).toThrow('NODE_ENV');
     });
-    test.each(['offline', 'readonly', 'dml'])('fase válida %s', value => expect(parsePhase(value, 'test')).toBe(value));
+    test.each(['offline', 'readonly', 'dml', 'http'])('fase válida %s', value => expect(parsePhase(value, 'test')).toBe(value));
     test.each(['SELECT 1', 'SHOW server_version', 'BEGIN', 'BEGIN READ ONLY', 'START TRANSACTION READ ONLY',
       'SELECT name FROM public.schema_migrations WHERE name = $1', 'SELECT to_regclass($1) AS relation',
       'ROLLBACK', 'COMMIT;', 'SELECT version()', 'SELECT * FROM current_schema()', 'SELECT * FROM current_database()',
@@ -97,12 +99,67 @@ if (phase === 'offline') {
       expect(() => markers(id, 0, 'a'.repeat(64))).toThrow();
       for (const bad of ['abc', '%'.repeat(12), '_'.repeat(12), "'".repeat(12), id + '\n']) expect(() => validateRunId(bad)).toThrow();
     });
+    test('HTTP comparte limpieza y cierre garantizado, separado de DML y readonly', () => {
+      const source = readFileSync(join(__dirname, 'support/connected.ts'), 'utf8');
+      expect(source).toContain("if (phase === 'dml' || phase === 'http') {\n      afterAll(async () => { try { if (gate.isArmed && observer?.isInitialized) await cleanup(); } finally { await close(); } });");
+      expect(source).toContain("if (phase === 'http') registerHttpTest(");
+      expect(source).toContain("if (phase === 'dml') {\n      test('registro, rollback, concurrencia y equivalencia Unicode'");
+      expect(source).toContain('finally { await observer.destroy(); }');
+      expect(source).toContain('if (app) await app.close(); else if (moduleRef) await moduleRef.close();');
+    });
+    test('HTTP: reservas y cobertura de limpieza incluso sin respuesta ni IDs guardados', () => {
+      const id = runId(), attempts = httpMarkers(id), targets = httpCleanupTargets(id);
+      expect(() => validateRunId(id)).not.toThrow();
+      expect(targets.emails).toEqual(attempts.reserved.map(m => m.email));
+      expect(targets.organizationNames).toEqual(attempts.reserved.map(m => m.organizationName));
+      expect(new Set(targets.emails).size).toBe(3);
+      expect(new Set(targets.organizationNames).size).toBe(3);
+      for (const marker of [...attempts.reserved, attempts.success, attempts.emailConflict, attempts.organizationConflict]) {
+        expect(marker.email.length).toBeLessThanOrEqual(120);
+        expect([...marker.organizationName].length).toBeLessThanOrEqual(80);
+        expect(targets.emails.includes(marker.email)).toBe(true);
+        expect(targets.organizationNames.includes(marker.organizationName)).toBe(true);
+      }
+      for (const foreign of [markers(id, 3, 'foreign'), markers(id, 99, 'http')]) {
+        expect(targets.emails.includes(foreign.email)).toBe(false);
+        // The second marker deliberately shares the exact reserved organization name.
+        expect(targets.organizationNames.includes(foreign.organizationName)).toBe(foreign.organizationName === attempts.success.organizationName);
+      }
+      expect(() => httpCleanupTargets('invalid')).toThrow('runId');
+      expect(attempts.emailConflict.email).toBe(attempts.success.email);
+      expect(attempts.organizationConflict.organizationName).toBe(attempts.success.organizationName);
+    });
+    test('HTTP: SQL exacto y parametrizado sin marcadores interpolados', () => {
+      const id = runId(), targets = httpCleanupTargets(id);
+      expect(httpCleanupSQL.memberships).toBe('DELETE FROM public.organization_memberships WHERE user_id IN (SELECT id FROM public.users WHERE email = ANY($1::text[])) OR organization_id IN (SELECT id FROM public.organizations WHERE name = ANY($2::text[]))');
+      expect(httpCleanupSQL.users).toBe('DELETE FROM public.users WHERE email = ANY($1::text[])');
+      expect(httpCleanupSQL.organizations).toBe('DELETE FROM public.organizations WHERE name = ANY($1::text[])');
+      for (const sql of Object.values(httpCleanupSQL)) {
+        expect(sql).toMatch(/\$1/);
+        expect(sql).not.toMatch(/LIKE|~|name_key/i);
+        for (const value of [id, ...targets.emails, ...targets.organizationNames]) expect(sql).not.toContain(value);
+      }
+      const source = readFileSync(join(__dirname, 'support/connected.ts'), 'utf8');
+      expect(source).toContain("const httpTargets = phase === 'http' ? httpCleanupTargets(id) : undefined;");
+      expect(source).toContain('observer!.query(httpCleanupSQL.memberships, [httpTargets.emails, httpTargets.organizationNames])');
+      expect(source).toContain('observer!.query(httpCleanupSQL.users, [httpTargets.emails])');
+      expect(source).toContain('observer!.query(httpCleanupSQL.organizations, [httpTargets.organizationNames])');
+    });
+    test('DML conserva patrones de limpieza por runId', () => {
+      const source = readFileSync(join(__dirname, 'support/connected.ts'), 'utf8');
+      const fallback = source.slice(source.indexOf('      if (httpTargets) {'), source.indexOf('      await empty();'));
+      expect(fallback).toContain('} else {');
+      expect(fallback).toContain('const emailPattern = `^b2b-${id}-[0-9]+@agenda-b2b[.]test$`, orgPattern = `B2B-${id}-%`;');
+      expect(fallback).toContain("observer!.query('DELETE FROM public.organization_memberships WHERE user_id IN (SELECT id FROM public.users WHERE email ~ $1) OR organization_id IN (SELECT id FROM public.organizations WHERE name LIKE $2)', [emailPattern, orgPattern])");
+      expect(fallback).toContain("observer!.query('DELETE FROM public.users WHERE email ~ $1', [emailPattern])");
+      expect(fallback).toContain("observer!.query('DELETE FROM public.organizations WHERE name LIKE $1', [orgPattern])");
+    });
     test('DeleteGate falla cerrado', () => {
-      for (const p of ['offline', 'readonly', 'dml'] as const) {
+      for (const p of ['offline', 'readonly', 'dml', 'http'] as const) {
         const gate = new DeleteGate(p);
         expect(() => gate.assertArmed()).toThrow(); expect(() => gate.arm()).toThrow();
         gate.mark('identity'); gate.mark('schema'); expect(() => gate.arm()).toThrow(); gate.mark('baseline');
-        if (p === 'dml') { gate.arm(); expect(() => gate.assertArmed()).not.toThrow(); }
+        if (p === 'dml' || p === 'http') { gate.arm(); expect(() => gate.assertArmed()).not.toThrow(); }
         else { expect(() => gate.arm()).toThrow(); expect(() => gate.assertArmed()).toThrow(); }
       }
     });
@@ -139,6 +196,7 @@ if (phase === 'offline') {
       expect(phaseEnvironment('readonly', env).PGOPTIONS).toBe('-c default_transaction_read_only=on');
       expect(phaseEnvironment('offline', env)).not.toHaveProperty('PGOPTIONS');
       expect(phaseEnvironment('dml', env)).not.toHaveProperty('PGOPTIONS');
+      expect(phaseEnvironment('http', env)).not.toHaveProperty('PGOPTIONS');
       expect(env.PGOPTIONS).toBe('-c something=off');
     });
   });
