@@ -2,7 +2,7 @@
  * TypeORM 1.1.2 PostgresDriver.connect/createPool and PostgresQueryRunner.getVersion:
  * SELECT version(), SELECT * FROM current_database(), SELECT * FROM current_schema().
  * SHOW server_version is also allowed. afterConnect only installs extensions when
- * metadata needs them: our three entities have PrimaryColumn uuid, no generated uuid,
+ * metadata needs them: our four entities have PrimaryColumn uuid, no generated uuid,
  * citext/hstore/spatial/cube/ltree/vector/exclusions/custom extensions. No extension SQL.
  * pg 8.23.1 connection-parameters.js:83 uses val('options', config); val reads
  * process.env['PG' + key.toUpperCase()] if config has no value. Production extra has

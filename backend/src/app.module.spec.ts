@@ -1,3 +1,7 @@
+import { AuthenticationService } from './auth/authentication.service';
+import { PasswordHasher } from './identity/password-hasher';
+import { LimitedPasswordHasher } from './identity/limited-password-hasher';
+import { UserSession } from './persistence/entities/user-session.entity';
 import { RegistrationController } from './registration/registration.controller';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { RequestMethod } from '@nestjs/common';
@@ -33,6 +37,7 @@ describe('AppModule', () => {
     }).overrideModule(DatabaseModule).useModule(TestDatabaseModule)
       // forFeature registra repositorios; reemplazarlos junto al runner evita necesitar DataSource.
       .overrideProvider(TransactionRunner).useValue({ run: jest.fn() })
+      .overrideProvider(getRepositoryToken(UserSession)).useValue({})
       .overrideProvider(getRepositoryToken(User)).useValue({})
       .overrideProvider(getRepositoryToken(Organization)).useValue({})
       .overrideProvider(getRepositoryToken(OrganizationMembership)).useValue({})
@@ -47,6 +52,10 @@ describe('AppModule', () => {
       expect(Reflect.getMetadata(PATH_METADATA, RegistrationController)).toBe('auth');
       expect(Reflect.getMetadata(PATH_METADATA, RegistrationController.prototype.register)).toBe('register');
       expect(Reflect.getMetadata(METHOD_METADATA, RegistrationController.prototype.register)).toBe(RequestMethod.POST);
+      const hasher = moduleRef.get(PasswordHasher);
+      expect(hasher).toBeInstanceOf(LimitedPasswordHasher);
+      expect((moduleRef.get(AuthenticationService) as unknown as { hasher: PasswordHasher }).hasher).toBe(hasher);
+      expect((moduleRef.get(RegistrationService) as unknown as { hasher: PasswordHasher }).hasher).toBe(hasher);
       expect(app).toBeDefined();
     } finally {
       await app.close();

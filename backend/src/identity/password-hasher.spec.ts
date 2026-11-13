@@ -100,7 +100,13 @@ describe('Argon2idPasswordHasher', () => {
       expect(native.verify).not.toHaveBeenCalled();
       jest.mocked(native.parseOptions).mockImplementation(actual.parseOptions);
       jest.mocked(native.verify).mockRejectedValue(failure);
-      expect(await hasher.verify(phc, password)).toBe(false);
+      await expect(hasher.verify(phc, password)).rejects.toThrow(ServiceUnavailableError);
+      try { await hasher.verify(phc, password); } catch (error) {
+        expect(String(error)).not.toContain(password);
+        expect(String(error)).not.toContain(phc);
+        expect((error as ServiceUnavailableError).retryAfterSeconds).toBeUndefined();
+        expect((error as Error).cause).toBeUndefined();
+      }
       jest.mocked(native.hash).mockRejectedValue(failure);
       await expect(hasher.hash(password)).rejects.toThrow(ServiceUnavailableError);
       try { await hasher.hash(password); } catch (error) {

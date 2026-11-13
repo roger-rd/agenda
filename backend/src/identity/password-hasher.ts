@@ -52,12 +52,12 @@ export class Argon2idPasswordHasher extends PasswordHasher {
   }
 
   async verify(phc: unknown, password: unknown): Promise<boolean> {
+    if (!validatedOptions(phc)) return false;
+    const prepared = preparePassword(password);
+    if (!prepared.ok) return false;
     try {
-      if (!validatedOptions(phc)) return false;
-      const prepared = preparePassword(password);
-      if (!prepared.ok) return false;
       return await verify(phc as string, prepared.value);
-    } catch { return false; }
+    } catch { throw new ServiceUnavailableError(); }
   }
 
   needsRehash(phc: unknown): boolean {

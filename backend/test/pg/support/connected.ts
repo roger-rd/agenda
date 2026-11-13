@@ -11,6 +11,7 @@ import { RegistrationService, REGISTRATION_NOW, REGISTRATION_NORMALIZERS, type R
 import { DataSourceTransactionRunner, TransactionRunner } from '../../../src/registration/transaction-runner';
 import { PasswordHasher } from '../../../src/identity/password-hasher';
 import { IdGenerator } from '../../../src/common/ids/id-generator';
+import { UserSession } from '../../../src/persistence/entities/user-session.entity';
 import { User } from '../../../src/persistence/entities/user.entity';
 import { Organization } from '../../../src/persistence/entities/organization.entity';
 import { OrganizationMembership } from '../../../src/persistence/entities/organization-membership.entity';
@@ -166,7 +167,7 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
         await captureSessions();
         expect(source.isInitialized).toBe(true); service = app.get(RegistrationService); expect(service).toBeInstanceOf(RegistrationService);
         expect(app.get(ConstraintRegistry).size).toBe(14);
-        expect(new Set(source.entityMetadatas.map(m => m.target))).toEqual(new Set([User, Organization, OrganizationMembership]));
+        expect(new Set(source.entityMetadatas.map(m => m.target))).toEqual(new Set([User, Organization, OrganizationMembership, UserSession]));
         ready = true;
         console.info(`[b2b] preflight completado: migrationHistory=${migrationHistory}`);
       } catch (error) { await close(); throw error; }

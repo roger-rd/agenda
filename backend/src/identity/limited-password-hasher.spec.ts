@@ -88,6 +88,22 @@ describe('LimitedPasswordHasher', () => {
     expect(inner.active).toBe(0);
   });
 
+  it('libera el cupo cuando verify propaga ServiceUnavailableError sin Retry-After', async () => {
+    const inner = new ControlledHasher();
+    const hasher = new LimitedPasswordHasher(inner, 1, 0);
+    const error = new ServiceUnavailableError();
+    const failed = hasher.verify('phc', 'clave');
+    const rejection = expect(failed).rejects.toBe(error);
+    inner.calls[0].reject(error);
+    await rejection;
+    expect(error.retryAfterSeconds).toBeUndefined();
+    const next = hasher.verify('phc', 'siguiente');
+    expect(inner.calls).toHaveLength(2);
+    inner.calls[1].resolve();
+    await expect(next).resolves.toBe(true);
+    expect(inner.active).toBe(0);
+  });
+
   it('delega needsRehash sin cupos y conserva ambos resultados de verify', async () => {
     const inner = new ControlledHasher();
     const hasher = new LimitedPasswordHasher(inner, 1, 0);

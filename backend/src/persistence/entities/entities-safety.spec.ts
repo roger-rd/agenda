@@ -53,19 +53,25 @@ describe('invariantes documentadas frente a las reglas de servicio', () => {
   });
 });
 
-describe('activación controlada de las entidades de registro', () => {
+describe('activación controlada de las entidades de identidad', () => {
   const sources = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
     const full = path.join(dir, entry.name);
     return entry.isDirectory() ? sources(full) : entry.name.endsWith('.ts') ? [full] : [];
   });
-  it('solo los archivos autorizados importan las tres entidades de registro desde persistence', () => {
+  it('solo los archivos autorizados importan las entidades de identidad desde persistence', () => {
     const allowedFiles = [
+      'auth/auth.module.ts',
+      'auth/session.service.ts',
+      'auth/session.service.spec.ts',
+      'auth/authentication.service.ts',
+      'auth/authentication.service.spec.ts',
       'registration/registration.module.ts',
       'registration/registration.service.ts',
       'registration/registration.service.spec.ts',
       'app.module.spec.ts',
     ];
     const allowedEntities: Record<string, string> = {
+      'persistence/entities/user-session.entity': 'UserSession',
       'persistence/entities/user.entity': 'User',
       'persistence/entities/organization.entity': 'Organization',
       'persistence/entities/organization-membership.entity': 'OrganizationMembership',
@@ -78,7 +84,7 @@ describe('activación controlada de las entidades de registro', () => {
       const source = ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true);
       const visit = (node: ts.Node): void => {
         // Incluye imports estáticos, reexports, require e import dinámico; solo
-        // se autorizan imports nombrados estáticos de los tres archivos exactos.
+        // se autorizan imports nombrados estáticos de los archivos exactos.
         if (ts.isStringLiteralLike(node) && /(^|\/)persistence(\/|$)/.test(node.text)) {
           actualFiles.add(relativeFile);
           expect(allowedFiles).toContain(relativeFile);
@@ -107,21 +113,25 @@ describe('activación controlada de las entidades de registro', () => {
     // Una excepción inexistente o que ya no importe entidades también falla.
     expect([...actualFiles].sort()).toEqual([...allowedFiles].sort());
   });
-  it('las tres entidades de registro resuelven sus FK sin conexión ni entidades extra', async () => {
-    const entities = [User, Organization, OrganizationMembership];
+  it('las entidades de identidad resuelven sus FK sin conexión ni entidades extra', async () => {
+    const entities = [User, Organization, OrganizationMembership, UserSession];
     const source = new DataSource({ type: 'postgres', entities, synchronize: false });
     // Mismo mecanismo local del beforeAll: no llama initialize ni abre conexiones.
     await (source as unknown as { buildMetadatas(): Promise<void> }).buildMetadatas();
     expect(source.isInitialized).toBe(false);
     expect(source.entityMetadatas.map(metadata => metadata.target)).toEqual(expect.arrayContaining(entities));
-    expect(source.entityMetadatas).toHaveLength(3);
+    expect(source.entityMetadatas).toHaveLength(4);
     const membership = source.getMetadata(OrganizationMembership);
     expect(membership.foreignKeys.map(fk => [fk.name, fk.referencedEntityMetadata.tableName]).sort()).toEqual([
       ['FK_organization_memberships_organization', 'organizations'],
       ['FK_organization_memberships_user', 'users'],
     ]);
     const references = source.entityMetadatas.flatMap(metadata => metadata.foreignKeys);
-    expect(references).toHaveLength(2);
+    expect(references).toHaveLength(4);
+    expect(source.getMetadata(UserSession).foreignKeys.map(fk => [fk.name, fk.referencedEntityMetadata.tableName]).sort()).toEqual([
+      ['FK_user_sessions_membership', 'organization_memberships'],
+      ['FK_user_sessions_user', 'users'],
+    ]);
     for (const fk of references) expect(entities).toContain(fk.referencedEntityMetadata.target);
     for (const metadata of source.entityMetadatas) {
       for (const relation of metadata.relations) expect(entities).toContain(relation.inverseEntityMetadata.target);

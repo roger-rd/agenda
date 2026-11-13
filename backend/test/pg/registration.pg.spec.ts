@@ -15,6 +15,11 @@ if (phase === 'offline') {
     test('no importa pg/typeorm ni necesita DATABASE_*', () => {
       expect(loadedDatabaseModules()).toEqual([]);
     });
+    test('connected exige exactamente las cuatro entidades de identidad', () => {
+      const source = readFileSync(join(__dirname, 'support/connected.ts'), 'utf8');
+      expect(source).toContain("import { UserSession } from '../../../src/persistence/entities/user-session.entity';");
+      expect(source).toContain('expect(new Set(source.entityMetadatas.map(m => m.target))).toEqual(new Set([User, Organization, OrganizationMembership, UserSession]));');
+    });
     test('huellas: referencias exactas de negocio y schema_migrations', () => {
       expect(businessFingerprint).toEqual({ columns: 68, constraints: 64, indexes: 26 });
       expect(migrationFingerprint).toEqual({ columns: 3, constraints: 1, indexes: 1 });
