@@ -1,3 +1,6 @@
+import { Clock } from '../../../src/common/clock/clock';
+import { assertAuthOrigin, ControlledClock } from './auth-controls';
+import { registerAuthTest } from './http-auth';
 import { registerHttpTest } from './http-register';
 import { Test, TestingModule } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
@@ -20,7 +23,7 @@ import { classifyDatabaseError } from '../../../src/database/errors/database-fai
 import { DatabaseOperationError } from '../../../src/database/errors/database-operation-error';
 import { normalizePersonName, organizationNameKey } from '../../../src/identity/person-name';
 import { normalizeEmail } from '../../../src/identity/email';
-import { DeleteGate, httpCleanupSQL, httpCleanupTargets, markers, runId, validateRunId } from './markers';
+import { authCleanupSQL, authCleanupTargets, DeleteGate, httpCleanupSQL, httpCleanupTargets, markers, runId, validateRunId } from './markers';
 import { accepted, checkRejected, columnTypeRejected, collisions, distinct, normalizerRejected } from './unicode-cases';
 import type { Phase } from './phase';
 import { assertFingerprint, businessFingerprint, migrationFingerprint, fingerprintSQL } from './schema-fingerprint';
@@ -36,9 +39,12 @@ type Session = { pid: number; backend_start: Date };
 const failure = (error: unknown) => error instanceof DatabaseOperationError ? error.failure : classifyDatabaseError(error);
 
 export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
+  if (phase === 'auth') assertAuthOrigin(process.env.APP_ALLOWED_ORIGINS);
   describe(`B2B ${phase}`, () => {
     const id = runId(), gate = new DeleteGate(phase), saved: RegistrationResult[] = [];
     const httpTargets = phase === 'http' ? httpCleanupTargets(id) : undefined;
+    const authTargets = phase === 'auth' ? authCleanupTargets(id) : undefined;
+    let clock: ControlledClock;
     let observer: DataSource | undefined, source: DataSource, app: INestApplication | undefined, moduleRef: TestingModule | undefined;
     let service: RegistrationService, sequence = 0, ready = false;
     let migrationHistory: MigrationHistory = 'unverified';
@@ -58,6 +64,10 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
     async function cleanup(): Promise<void> {
       gate.assertArmed(); validateRunId(id);
       const userIds = saved.map(r => r.user.id), orgIds = saved.map(r => r.organization.id);
+      if (authTargets) {
+        await observer!.query('DELETE FROM public.user_sessions WHERE user_id = ANY($1::uuid[])', [userIds]);
+        await observer!.query('DELETE FROM public.organization_memberships WHERE id = ANY($1::uuid[])', [saved.map(r => r.membership.id)]);
+      }
       // First saved ids, then exact HTTP reservations or DML run patterns. Always WHERE.
       if (httpTargets) {
         await observer!.query('DELETE FROM public.organization_memberships WHERE id = ANY($1::uuid[])', [saved.map(r => r.membership.id)]);
@@ -69,6 +79,11 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
         await observer!.query(httpCleanupSQL.memberships, [httpTargets.emails, httpTargets.organizationNames]);
         await observer!.query(httpCleanupSQL.users, [httpTargets.emails]);
         await observer!.query(httpCleanupSQL.organizations, [httpTargets.organizationNames]);
+      } else if (authTargets) {
+        await observer!.query(authCleanupSQL.sessions, [authTargets.emails]);
+        await observer!.query(authCleanupSQL.memberships, [authTargets.emails, authTargets.organizationNames]);
+        await observer!.query(authCleanupSQL.users, [authTargets.emails]);
+        await observer!.query(authCleanupSQL.organizations, [authTargets.organizationNames]);
       } else {
         const emailPattern = `^b2b-${id}-[0-9]+@agenda-b2b[.]test$`, orgPattern = `B2B-${id}-%`;
         await observer!.query('DELETE FROM public.organization_memberships WHERE user_id IN (SELECT id FROM public.users WHERE email ~ $1) OR organization_id IN (SELECT id FROM public.organizations WHERE name LIKE $2)', [emailPattern, orgPattern]);
@@ -140,6 +155,10 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
         const migrations = await observer.query(fingerprintSQL, [['schema_migrations']]);
         console.info('[b2b] huella schema_migrations (referencia 3/1/1)', migrations);
         assertFingerprint('schema_migrations', migrations[0], migrationFingerprint);
+        if (phase === 'auth') {
+          const roles: { pg_get_constraintdef: string }[] = await observer.query("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'CK_organization_memberships_role'");
+          expect(roles.length === 1 && roles[0].pg_get_constraintdef.includes("'worker'")).toBe(true);
+        }
         gate.mark('schema');
         // Only a pg permission error from this history query may be tolerated.
         let historyResult: { rows: unknown[] } | { error: unknown };
@@ -151,7 +170,10 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
         await empty(); gate.mark('baseline');
         beforePids = new Set((await observer.query(sessionSQL) as Session[]).map(s => s.pid));
         const { AppModule } = await import('../../../src/app.module');
-        moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+        clock = new ControlledClock();
+        moduleRef = phase === 'auth'
+          ? await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(Clock).useValue(clock).compile()
+          : await Test.createTestingModule({ imports: [AppModule] }).compile();
         app = moduleRef.createNestApplication(); await configureHttpApp(app); await app.init();
         source = app.get(DataSource);
         if (phase === 'readonly') {
@@ -174,10 +196,13 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
     });
     if (phase === 'dml' || phase === 'http') {
       afterAll(async () => { try { if (gate.isArmed && observer?.isInitialized) await cleanup(); } finally { await close(); } });
+    } else if (phase === 'auth') {
+      afterAll(async () => { try { if (gate.isArmed && observer?.isInitialized) await cleanup(); } finally { await close(); } });
     } else {
       afterAll(close); // readonly never registers a cleanup hook.
     }
     test('preflight y AppModule reales', () => expect(ready).toBe(true));
+    if (phase === 'auth') registerAuthTest(() => ({ app: app!, observer: observer!, source, clock, gate, saved, id, ready }));
     if (phase === 'http') registerHttpTest(() => ({ app: app!, observer: observer!, gate, saved, id, ready, counts, credentials: input('http') }));
     if (phase === 'dml') {
       test('registro, rollback, concurrencia y equivalencia Unicode', async () => {

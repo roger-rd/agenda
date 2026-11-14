@@ -9,8 +9,11 @@ import { DeleteGate, httpCleanupSQL, httpCleanupTargets, httpMarkers, markers, r
 import { normalizerRejected, checkRejected, columnTypeRejected, collisions, distinct } from './support/unicode-cases';
 import { normalizePersonName, organizationNameKey } from '../../src/identity/person-name';
 
+import { registerAuthOfflineTests } from './support/auth-offline';
+
 const phase = parsePhase(process.env.AGENDA_B2B_PHASE, process.env.NODE_ENV);
 if (phase === 'offline') {
+  registerAuthOfflineTests();
   describe('B2B offline (sin DATABASE_* ni conexiones)', () => {
     test('no importa pg/typeorm ni necesita DATABASE_*', () => {
       expect(loadedDatabaseModules()).toEqual([]);

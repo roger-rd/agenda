@@ -17,11 +17,11 @@ export class DeleteGate {
   constructor(private readonly phase: Phase) {}
   mark(check: 'identity' | 'schema' | 'baseline'): void { this.passed.add(check); }
   arm(): void {
-    if ((this.phase !== 'dml' && this.phase !== 'http') || this.passed.size !== 3) throw new Error('Armado requiere dml o http, identidad, esquema y línea base');
+    if ((this.phase !== 'dml' && this.phase !== 'http' && this.phase !== 'auth') || this.passed.size !== 3) throw new Error('Armado requiere dml, http o auth, identidad, esquema y línea base');
     this.armed = true;
   }
   assertArmed(): void {
-    if ((this.phase !== 'dml' && this.phase !== 'http') || !this.armed) throw new Error('Borrado requiere dml o http y gate armado');
+    if ((this.phase !== 'dml' && this.phase !== 'http' && this.phase !== 'auth') || !this.armed) throw new Error('Borrado requiere dml, http o auth y gate armado');
   }
   get isArmed(): boolean { return this.armed; }
 }
@@ -51,4 +51,16 @@ export const httpCleanupSQL = {
   memberships: 'DELETE FROM public.organization_memberships WHERE user_id IN (SELECT id FROM public.users WHERE email = ANY($1::text[])) OR organization_id IN (SELECT id FROM public.organizations WHERE name = ANY($2::text[]))',
   users: 'DELETE FROM public.users WHERE email = ANY($1::text[])',
   organizations: 'DELETE FROM public.organizations WHERE name = ANY($1::text[])',
+} as const;
+
+export function authMarkers(id: string) {
+  return { a: markers(id, 10, 'auth-a'), b: markers(id, 11, 'auth-b'), unknown: markers(id, 12, 'auth-unknown') };
+}
+export function authCleanupTargets(id: string) {
+  const { a, b } = authMarkers(id);
+  return { emails: [a.email, b.email], organizationNames: [a.organizationName, b.organizationName] };
+}
+export const authCleanupSQL = {
+  sessions: 'DELETE FROM public.user_sessions WHERE user_id IN (SELECT id FROM public.users WHERE email = ANY($1::text[]))',
+  ...httpCleanupSQL,
 } as const;
