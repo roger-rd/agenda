@@ -7,7 +7,7 @@ function validateEnvironment(input: Record<string, unknown>) {
   const env = input.NODE_ENV ?? 'development';
   const suffix = env === 'production' ? 'live' : env === 'test' ? 'test' : 'dev';
   return validate({ DATABASE_NAME: `agenda_${suffix}`, DATABASE_USER: `agenda_${suffix}_app`,
-    DATABASE_PASSWORD: 'fake-password-for-unit-tests-0001', ...input });
+    DATABASE_PASSWORD: 'fake-password-for-unit-tests-0001', APP_ALLOWED_ORIGINS: 'https://agenda.test', ...input });
 }
 
 describe('Configuración', () => {
@@ -34,6 +34,7 @@ describe('Configuración', () => {
   });
   it('ofrece valores tipados', () => {
     const service = new AppConfigService(new ConfigService(validateEnvironment({ NODE_ENV: 'production', PORT: '4000' })));
+    expect(service.allowedOrigins).toEqual(['https://agenda.test']);
     expect(service.env).toBe('production');
     expect(service.host).toBe('127.0.0.1');
     expect(service.port).toBe(4000);
@@ -49,15 +50,15 @@ describe('Integración de BD', () => {
   it('rechaza credenciales de migración y agrega errores escalares y de BD', () => {
     let message = '';
     try { validate({ NODE_ENV: 'CANARIO_SECRETO_123', PORT: 'CANARIO_SECRETO_123',
-      DATABASE_PASSWORD: 'CANARIO_SECRETO_123 ', DATABASE_MIGRATION_USER: 'CANARIO_SECRETO_123',
+      APP_ALLOWED_ORIGINS: 'CANARIO_SECRETO_123', DATABASE_PASSWORD: 'CANARIO_SECRETO_123 ', DATABASE_MIGRATION_USER: 'CANARIO_SECRETO_123',
       DATABASE_MIGRATION_PASSWORD: 'CANARIO_SECRETO_123' }); }
     catch (error) { message = (error as Error).message; }
-    for (const key of ['NODE_ENV', 'PORT', 'DATABASE_NAME', 'DATABASE_USER', 'DATABASE_PASSWORD',
+    for (const key of ['APP_ALLOWED_ORIGINS', 'NODE_ENV', 'PORT', 'DATABASE_NAME', 'DATABASE_USER', 'DATABASE_PASSWORD',
       'DATABASE_MIGRATION_USER', 'DATABASE_MIGRATION_PASSWORD']) expect(message).toContain(key);
     expect(message).not.toContain('CANARIO_SECRETO_123');
   });
-  it('solo devuelve las cuatro variables escalares y DATABASE', () => {
+  it('solo devuelve las variables validadas', () => {
     expect(Object.keys(validateEnvironment({ NODE_ENV: 'test' })).sort())
-      .toEqual(['DATABASE', 'HOST', 'LOG_LEVEL', 'NODE_ENV', 'PORT']);
+      .toEqual(['APP_ALLOWED_ORIGINS', 'DATABASE', 'HOST', 'LOG_LEVEL', 'NODE_ENV', 'PORT']);
   });
 });

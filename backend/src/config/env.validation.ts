@@ -1,3 +1,4 @@
+import { parseAllowedOrigins } from './allowed-origins';
 import { plainToInstance } from 'class-transformer';
 import { IsIn, IsInt, Max, Min, ValidateBy, validateSync } from 'class-validator';
 import { EnvironmentValidationError, hostValidator } from './validation-rules';
@@ -28,7 +29,7 @@ export class EnvironmentVariables {
 
 export { EnvironmentValidationError } from './validation-rules';
 
-export type ValidatedEnvironment = EnvironmentVariables & { DATABASE: DatabaseConnectionConfig };
+export type ValidatedEnvironment = EnvironmentVariables & { DATABASE: DatabaseConnectionConfig; APP_ALLOWED_ORIGINS: readonly string[] };
 
 export function validateEnvironment(input: Record<string, unknown>): ValidatedEnvironment {
   const env = input.NODE_ENV === undefined ? 'development' : input.NODE_ENV;
@@ -43,6 +44,12 @@ export function validateEnvironment(input: Record<string, unknown>): ValidatedEn
   const messages = errors.map(error =>
     `${error.property}: ${[...new Set(Object.values(error.constraints ?? {}))].join('; ')}`,
   );
+  let allowedOrigins: readonly string[] = [];
+  try { allowedOrigins = parseAllowedOrigins(input.APP_ALLOWED_ORIGINS, result.NODE_ENV); }
+  catch (error) {
+    if (!(error instanceof EnvironmentValidationError)) throw error;
+    messages.push(error.message);
+  }
   let database: DatabaseConnectionConfig | undefined;
   try {
     database = validateDatabaseEnvironment(input, { nodeEnv: result.NODE_ENV, role: 'app' });
@@ -53,5 +60,5 @@ export function validateEnvironment(input: Record<string, unknown>): ValidatedEn
   const migrationKeys = Object.keys(input).filter(key => key.startsWith('DATABASE_MIGRATION_'));
   if (migrationKeys.length) messages.push(`Las credenciales de migración no deben estar en el entorno de la aplicación: ${migrationKeys.sort().join(', ')}`);
   if (messages.length || !database) throw new EnvironmentValidationError(messages.join('\n'));
-  return Object.assign(result, { DATABASE: database });
+  return Object.assign(result, { DATABASE: database, APP_ALLOWED_ORIGINS: allowedOrigins });
 }

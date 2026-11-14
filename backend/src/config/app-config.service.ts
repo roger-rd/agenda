@@ -7,6 +7,7 @@ import { ValidatedEnvironment } from './env.validation';
 export class AppConfigService {
   constructor(private readonly config: ConfigService<ValidatedEnvironment, true>) {}
   get database(): DatabaseConnectionConfig { return this.config.get('DATABASE', { infer: true }); }
+  get allowedOrigins(): readonly string[] { return this.config.get('APP_ALLOWED_ORIGINS', { infer: true }); }
   get env() { return this.config.get('NODE_ENV', { infer: true }); }
   get host() { return this.config.get('HOST', { infer: true }); }
   get port() { return this.config.get('PORT', { infer: true }); }

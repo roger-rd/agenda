@@ -1,7 +1,10 @@
+import type { Request, Response, NextFunction } from 'express';
 import type { INestApplication } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { ExpressAdapter } from '@nestjs/platform-express';
 import { json } from 'express';
+import { AppConfigService } from '../../config/app-config.service';
+import { OriginGuard } from './origin.guard';
 import { setupHttpLogging } from '../../logging/setup-http-logging';
 import { securityHeaders } from './security-headers';
 import { createValidationPipe } from './validation.pipe';
@@ -17,8 +20,13 @@ export async function configureHttpApp(app: INestApplication): Promise<void> {
   const setNotFoundHandler = adapter.setNotFoundHandler.bind(adapter);
   adapter.setNotFoundHandler = handler => setNotFoundHandler(handler);
   app.use(securityHeaders);
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.path === '/api/v1/auth' || req.path.startsWith('/api/v1/auth/')) res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
   await setupHttpLogging(app);
   app.use(json({ limit: '100kb' }));
   app.useGlobalPipes(createValidationPipe());
-  app.useGlobalGuards(new JsonBodyGuard(app.get(Reflector)));
+  const reflector = app.get(Reflector);
+  app.useGlobalGuards(new OriginGuard(app.get(AppConfigService), reflector), new JsonBodyGuard(reflector));
 }

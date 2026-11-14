@@ -1,3 +1,4 @@
+import { AuthController } from './auth/auth.controller';
 import { AuthenticationService } from './auth/authentication.service';
 import { PasswordHasher } from './identity/password-hasher';
 import { LimitedPasswordHasher } from './identity/limited-password-hasher';
@@ -52,6 +53,12 @@ describe('AppModule', () => {
       expect(Reflect.getMetadata(PATH_METADATA, RegistrationController)).toBe('auth');
       expect(Reflect.getMetadata(PATH_METADATA, RegistrationController.prototype.register)).toBe('register');
       expect(Reflect.getMetadata(METHOD_METADATA, RegistrationController.prototype.register)).toBe(RequestMethod.POST);
+      expect(moduleRef.get(AuthController)).toBeInstanceOf(AuthController);
+      expect(Reflect.getMetadata(PATH_METADATA, AuthController)).toBe('auth');
+      for (const [name, method] of [['login', RequestMethod.POST], ['session', RequestMethod.GET], ['logout', RequestMethod.POST]] as const) {
+        expect(Reflect.getMetadata(PATH_METADATA, AuthController.prototype[name])).toBe(name);
+        expect(Reflect.getMetadata(METHOD_METADATA, AuthController.prototype[name])).toBe(method);
+      }
       const hasher = moduleRef.get(PasswordHasher);
       expect(hasher).toBeInstanceOf(LimitedPasswordHasher);
       expect((moduleRef.get(AuthenticationService) as unknown as { hasher: PasswordHasher }).hasher).toBe(hasher);
