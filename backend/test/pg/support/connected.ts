@@ -1,3 +1,5 @@
+import { registerCompaniesTest } from './http-companies';
+import { companiesMarkers, companiesCleanupSQL, companiesCleanupTargets, type CompaniesSaved } from './companies-fixture';
 import { Clock } from '../../../src/common/clock/clock';
 import { assertAuthOrigin, ControlledClock } from './auth-controls';
 import { registerAuthTest } from './http-auth';
@@ -14,9 +16,9 @@ import { RegistrationService, REGISTRATION_NOW, REGISTRATION_NORMALIZERS, type R
 import { DataSourceTransactionRunner, TransactionRunner } from '../../../src/registration/transaction-runner';
 import { PasswordHasher } from '../../../src/identity/password-hasher';
 import { IdGenerator } from '../../../src/common/ids/id-generator';
-import { UserSession } from '../../../src/persistence/entities/user-session.entity';
 import { Company } from '../../../src/persistence/entities/company.entity';
 import { CompanyAccess } from '../../../src/persistence/entities/company-access.entity';
+import { UserSession } from '../../../src/persistence/entities/user-session.entity';
 import { User } from '../../../src/persistence/entities/user.entity';
 import { Organization } from '../../../src/persistence/entities/organization.entity';
 import { OrganizationMembership } from '../../../src/persistence/entities/organization-membership.entity';
@@ -46,6 +48,9 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
     const id = runId(), gate = new DeleteGate(phase), saved: RegistrationResult[] = [];
     const httpTargets = phase === 'http' ? httpCleanupTargets(id) : undefined;
     const authTargets = phase === 'auth' ? authCleanupTargets(id) : undefined;
+    const companiesTargets = phase === 'companies' ? companiesCleanupTargets(id) : undefined;
+    const companiesReservations = phase === 'companies' ? companiesMarkers(id) : undefined;
+    const companiesSaved: CompaniesSaved = { users: [], memberships: [], companies: [] };
     let clock: ControlledClock;
     let observer: DataSource | undefined, source: DataSource, app: INestApplication | undefined, moduleRef: TestingModule | undefined;
     let service: RegistrationService, sequence = 0, ready = false;
@@ -66,6 +71,7 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
     async function cleanup(): Promise<void> {
       gate.assertArmed(); validateRunId(id);
       const userIds = saved.map(r => r.user.id), orgIds = saved.map(r => r.organization.id);
+      if (companiesTargets) { await cleanupCompanies(userIds, orgIds); return; }
       if (authTargets) {
         await observer!.query('DELETE FROM public.user_sessions WHERE user_id = ANY($1::uuid[])', [userIds]);
         await observer!.query('DELETE FROM public.organization_memberships WHERE id = ANY($1::uuid[])', [saved.map(r => r.membership.id)]);
@@ -92,6 +98,25 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
         await observer!.query('DELETE FROM public.users WHERE email ~ $1', [emailPattern]);
         await observer!.query('DELETE FROM public.organizations WHERE name LIKE $1', [orgPattern]);
       }
+      await empty();
+    }
+    async function cleanupCompanies(userIds: string[], orgIds: string[]): Promise<void> {
+      gate.assertArmed();
+      if (!companiesTargets) throw new Error('companies requiere reservas');
+      const users = [...userIds, ...companiesSaved.users], memberships = [...saved.map(r => r.membership.id), ...companiesSaved.memberships];
+      await observer!.query('DELETE FROM public.user_sessions WHERE user_id = ANY($1::uuid[])', [users]);
+      await observer!.query('DELETE FROM public.company_accesses WHERE membership_id = ANY($1::uuid[]) OR company_id = ANY($2::uuid[])', [memberships, companiesSaved.companies]);
+      await observer!.query('DELETE FROM public.companies WHERE id = ANY($1::uuid[])', [companiesSaved.companies]);
+      await observer!.query('DELETE FROM public.organization_memberships WHERE id = ANY($1::uuid[])', [memberships]);
+      await observer!.query('DELETE FROM public.users WHERE id = ANY($1::uuid[])', [users]);
+      await observer!.query('DELETE FROM public.organizations WHERE id = ANY($1::uuid[])', [orgIds]);
+      const { emails, organizationNames } = companiesTargets;
+      await observer!.query(companiesCleanupSQL.sessions, [emails]);
+      await observer!.query(companiesCleanupSQL.accesses, [emails, organizationNames]);
+      await observer!.query(companiesCleanupSQL.companies, [organizationNames]);
+      await observer!.query(companiesCleanupSQL.memberships, [emails, organizationNames]);
+      await observer!.query(companiesCleanupSQL.users, [emails]);
+      await observer!.query(companiesCleanupSQL.organizations, [organizationNames]);
       await empty();
     }
     async function register(value: ReturnType<typeof input>, target = service): Promise<RegistrationResult> {
@@ -198,12 +223,13 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
     });
     if (phase === 'dml' || phase === 'http') {
       afterAll(async () => { try { if (gate.isArmed && observer?.isInitialized) await cleanup(); } finally { await close(); } });
-    } else if (phase === 'auth') {
+    } else if (phase === 'auth' || phase === 'companies') {
       afterAll(async () => { try { if (gate.isArmed && observer?.isInitialized) await cleanup(); } finally { await close(); } });
     } else {
       afterAll(close); // readonly never registers a cleanup hook.
     }
     test('preflight y AppModule reales', () => expect(ready).toBe(true));
+    if (phase === 'companies') registerCompaniesTest(() => ({ app: app!, observer: observer!, gate, saved, seeded: companiesSaved, reservations: companiesReservations!, ready }));
     if (phase === 'auth') registerAuthTest(() => ({ app: app!, observer: observer!, source, clock, gate, saved, id, ready }));
     if (phase === 'http') registerHttpTest(() => ({ app: app!, observer: observer!, gate, saved, id, ready, counts, credentials: input('http') }));
     if (phase === 'dml') {

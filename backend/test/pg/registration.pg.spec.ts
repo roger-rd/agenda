@@ -1,3 +1,4 @@
+import { registerCompaniesOfflineTests } from './support/companies-offline';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { registerConnectedSuite, loadedDatabaseModules } from './support/load-connected.cjs';
@@ -14,6 +15,7 @@ import { registerAuthOfflineTests } from './support/auth-offline';
 const phase = parsePhase(process.env.AGENDA_B2B_PHASE, process.env.NODE_ENV);
 if (phase === 'offline') {
   registerAuthOfflineTests();
+  registerCompaniesOfflineTests();
   describe('B2B offline (sin DATABASE_* ni conexiones)', () => {
     test('no importa pg/typeorm ni necesita DATABASE_*', () => {
       expect(loadedDatabaseModules()).toEqual([]);

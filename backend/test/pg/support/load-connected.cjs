@@ -1,4 +1,4 @@
-/** @param {'readonly' | 'dml' | 'http' | 'auth'} phase */
+/** @param {'readonly' | 'dml' | 'http' | 'auth' | 'companies'} phase */
 exports.registerConnectedSuite = function (phase) {
   // Deferred synchronous import: Jest requires describe/test registration synchronously.
   require('./connected').registerConnectedSuite(phase);
