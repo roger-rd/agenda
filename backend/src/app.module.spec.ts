@@ -1,3 +1,6 @@
+import { CompaniesController } from './companies/companies.controller';
+import { Company } from './persistence/entities/company.entity';
+import { CompanyAccess } from './persistence/entities/company-access.entity';
 import { AuthController } from './auth/auth.controller';
 import { AuthenticationService } from './auth/authentication.service';
 import { PasswordHasher } from './identity/password-hasher';
@@ -38,6 +41,8 @@ describe('AppModule', () => {
     }).overrideModule(DatabaseModule).useModule(TestDatabaseModule)
       // forFeature registra repositorios; reemplazarlos junto al runner evita necesitar DataSource.
       .overrideProvider(TransactionRunner).useValue({ run: jest.fn() })
+      .overrideProvider(getRepositoryToken(Company)).useValue({ query: jest.fn() })
+      .overrideProvider(getRepositoryToken(CompanyAccess)).useValue({})
       .overrideProvider(getRepositoryToken(UserSession)).useValue({})
       .overrideProvider(getRepositoryToken(User)).useValue({})
       .overrideProvider(getRepositoryToken(Organization)).useValue({})
@@ -63,6 +68,10 @@ describe('AppModule', () => {
       expect(hasher).toBeInstanceOf(LimitedPasswordHasher);
       expect((moduleRef.get(AuthenticationService) as unknown as { hasher: PasswordHasher }).hasher).toBe(hasher);
       expect((moduleRef.get(RegistrationService) as unknown as { hasher: PasswordHasher }).hasher).toBe(hasher);
+      expect(moduleRef.get(CompaniesController)).toBeInstanceOf(CompaniesController);
+      expect(Reflect.getMetadata(PATH_METADATA, CompaniesController)).toBe('companies');
+      expect(Reflect.getMetadata(PATH_METADATA, CompaniesController.prototype.list)).toBe('/');
+      expect(Reflect.getMetadata(METHOD_METADATA, CompaniesController.prototype.list)).toBe(RequestMethod.GET);
       expect(app).toBeDefined();
     } finally {
       await app.close();

@@ -15,6 +15,8 @@ import { DataSourceTransactionRunner, TransactionRunner } from '../../../src/reg
 import { PasswordHasher } from '../../../src/identity/password-hasher';
 import { IdGenerator } from '../../../src/common/ids/id-generator';
 import { UserSession } from '../../../src/persistence/entities/user-session.entity';
+import { Company } from '../../../src/persistence/entities/company.entity';
+import { CompanyAccess } from '../../../src/persistence/entities/company-access.entity';
 import { User } from '../../../src/persistence/entities/user.entity';
 import { Organization } from '../../../src/persistence/entities/organization.entity';
 import { OrganizationMembership } from '../../../src/persistence/entities/organization-membership.entity';
@@ -189,7 +191,7 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
         await captureSessions();
         expect(source.isInitialized).toBe(true); service = app.get(RegistrationService); expect(service).toBeInstanceOf(RegistrationService);
         expect(app.get(ConstraintRegistry).size).toBe(14);
-        expect(new Set(source.entityMetadatas.map(m => m.target))).toEqual(new Set([User, Organization, OrganizationMembership, UserSession]));
+        expect(new Set(source.entityMetadatas.map(m => m.target))).toEqual(new Set([User, Organization, OrganizationMembership, UserSession, Company, CompanyAccess]));
         ready = true;
         console.info(`[b2b] preflight completado: migrationHistory=${migrationHistory}`);
       } catch (error) { await close(); throw error; }

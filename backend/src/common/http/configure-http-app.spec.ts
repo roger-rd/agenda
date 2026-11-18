@@ -36,6 +36,15 @@ it('prefijo, seguridad, logging antes del parser y validación global', async ()
   expect(disable).toHaveBeenCalledWith('x-powered-by');
   expect(app.use).toHaveBeenNthCalledWith(1, securityHeaders);
   expect(jest.mocked(setupHttpLogging).mock.invocationCallOrder[0]).toBeLessThan(app.use.mock.invocationCallOrder[2]);
+  const cache = app.use.mock.calls[1][0] as (req: { path: string }, res: { setHeader: jest.Mock }, next: jest.Mock) => void;
+  for (const path of ['/api/v1/auth', '/api/v1/auth/desconocida', '/api/v1/companies', '/api/v1/companies/desconocida',
+    '/api/v1/health', '/api/v1/companiesx', '/api/v1/authenticacion']) {
+    const setHeader = jest.fn(); const next = jest.fn();
+    cache({ path }, { setHeader }, next);
+    if (['/api/v1/health', '/api/v1/companiesx', '/api/v1/authenticacion'].includes(path)) expect(setHeader).not.toHaveBeenCalled();
+    else expect(setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
+    expect(next).toHaveBeenCalledTimes(1);
+  }
   expect(app.useGlobalPipes).toHaveBeenCalledTimes(1);
   expect(app.useGlobalGuards).toHaveBeenCalledTimes(1);
   expect(app.useGlobalGuards).toHaveBeenCalledWith(expect.any(OriginGuard), expect.any(JsonBodyGuard));
@@ -70,7 +79,7 @@ describe('no-store antes del parser en HTTP real', () => {
     await configureHttpApp(app); await app.init();
   });
   afterEach(async () => { await app?.close(); });
-  it.each(['/api/v1/auth', '/api/v1/auth/desconocida'])('incluye 404 en %s', async path => {
+  it.each(['/api/v1/auth', '/api/v1/auth/desconocida', '/api/v1/companies', '/api/v1/companies/desconocida'])('incluye 404 en %s', async path => {
     const response = await request(app.getHttpServer()).get(path).expect(404);
     expect(response.headers['cache-control']).toBe('no-store');
   });
@@ -81,7 +90,7 @@ describe('no-store antes del parser en HTTP real', () => {
     for (const response of [ok, large, media]) expect(response.headers['cache-control']).toBe('no-store');
   });
   it('no afecta health ni prefijos parecidos', async () => {
-    for (const path of ['/api/v1/health', '/api/v1/authenticacion']) {
+    for (const path of ['/api/v1/health', '/api/v1/authenticacion', '/api/v1/companiesx']) {
       const response = await request(app.getHttpServer()).get(path);
       expect(response.headers['cache-control']).toBeUndefined();
     }

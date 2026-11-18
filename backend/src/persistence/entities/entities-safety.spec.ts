@@ -1,3 +1,5 @@
+import { Company } from './company.entity';
+import { CompanyAccess } from './company-access.entity';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { inspect } from 'node:util';
@@ -60,6 +62,9 @@ describe('activación controlada de las entidades de identidad', () => {
   });
   it('solo los archivos autorizados importan las entidades de identidad desde persistence', () => {
     const allowedFiles = [
+      'companies/companies.module.ts',
+      'companies/companies.service.ts',
+      'companies/companies.service.spec.ts',
       'auth/auth.module.ts',
       'auth/session.service.ts',
       'auth/session.service.spec.ts',
@@ -71,6 +76,8 @@ describe('activación controlada de las entidades de identidad', () => {
       'app.module.spec.ts',
     ];
     const allowedEntities: Record<string, string> = {
+      'persistence/entities/company.entity': 'Company',
+      'persistence/entities/company-access.entity': 'CompanyAccess',
       'persistence/entities/user-session.entity': 'UserSession',
       'persistence/entities/user.entity': 'User',
       'persistence/entities/organization.entity': 'Organization',
@@ -136,6 +143,20 @@ describe('activación controlada de las entidades de identidad', () => {
     for (const metadata of source.entityMetadatas) {
       for (const relation of metadata.relations) expect(entities).toContain(relation.inverseEntityMetadata.target);
     }
+  });
+  it('las seis entidades resuelven las FK de empresas sin conexión ni entidades extra', async () => {
+    const entities = [User, Organization, OrganizationMembership, UserSession, Company, CompanyAccess];
+    const source = new DataSource({ type: 'postgres', entities, synchronize: false });
+    await (source as unknown as { buildMetadatas(): Promise<void> }).buildMetadatas();
+    expect(source.isInitialized).toBe(false);
+    expect(new Set(source.entityMetadatas.map(metadata => metadata.target))).toEqual(new Set(entities));
+    expect(source.entityMetadatas).toHaveLength(6);
+    expect(source.getMetadata(Company).foreignKeys.map(fk => [fk.name, fk.referencedEntityMetadata.tableName])).toEqual([
+      ['FK_companies_organization', 'organizations'],
+    ]);
+    expect(source.getMetadata(CompanyAccess).foreignKeys.map(fk => [fk.name, fk.referencedEntityMetadata.tableName]).sort()).toEqual([
+      ['FK_company_accesses_company', 'companies'], ['FK_company_accesses_membership', 'organization_memberships'],
+    ]);
   });
   it('el DataSource de la aplicación conserva entities vacío y migrations vacío, y la barrera sigue intacta', () => {
     const source = read(path.join(backendSrc, 'database/data-source-options.ts'));

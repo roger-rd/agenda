@@ -21,7 +21,7 @@ export async function configureHttpApp(app: INestApplication): Promise<void> {
   adapter.setNotFoundHandler = handler => setNotFoundHandler(handler);
   app.use(securityHeaders);
   app.use((req: Request, res: Response, next: NextFunction) => {
-    if (req.path === '/api/v1/auth' || req.path.startsWith('/api/v1/auth/')) res.setHeader('Cache-Control', 'no-store');
+    if (['/api/v1/auth', '/api/v1/companies'].some(prefix => req.path === prefix || req.path.startsWith(`${prefix}/`))) res.setHeader('Cache-Control', 'no-store');
     next();
   });
   await setupHttpLogging(app);
