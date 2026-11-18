@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { Clock } from '../common/clock/clock';
 import { Controller, Get, INestApplication } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
@@ -10,6 +11,7 @@ import { SessionAuthGuard } from '../auth/session-auth.guard';
 import { AllExceptionsFilter } from '../common/errors/all-exceptions.filter';
 import { configureHttpApp } from '../common/http/configure-http-app';
 import { serializeClearedSessionCookie, sessionCookieConfig } from '../common/http/cookies';
+import { IdsModule } from '../common/ids/ids.module';
 import { IdGenerator } from '../common/ids/id-generator';
 import { AppConfigService } from '../config/app-config.service';
 import { generateSessionToken } from '../identity/session-token';
@@ -40,20 +42,20 @@ describe('empresas HTTP con servicio y logging reales, sin PostgreSQL', () => {
   const query = jest.fn();
   const appConfig = { env: 'test', logLevel: 'info', allowedOrigins: [origin] };
   beforeEach(async () => {
-    output = ''; appConfig.allowedOrigins = [origin];
+    output = ''; appConfig.env = 'test'; appConfig.allowedOrigins = [origin];
     authenticate.mockReset().mockResolvedValue(session);
     query.mockReset().mockResolvedValue([row]);
     let sequence = 0;
     const ids = { next: () => `petición-${++sequence}` };
     const stream = new Writable({ write(chunk, _encoding, done) { output += String(chunk); done(); } });
     const module = await Test.createTestingModule({
-      imports: [LoggerModule.forRoot({ pinoHttp: createLoggerOptions({ logLevel: 'info' }, stream, ids), useExisting: true })],
+      imports: [IdsModule, LoggerModule.forRoot({ pinoHttp: createLoggerOptions({ logLevel: 'info' }, stream, ids), useExisting: true })],
       controllers: [CompaniesController, HealthController],
-      providers: [CompaniesService, SessionAuthGuard,
+      providers: [{ provide: Clock, useValue: { now: () => now } }, CompaniesService, SessionAuthGuard,
         { provide: 'CompanyRepository', useValue: { query } },
         { provide: SessionService, useValue: { authenticate } }, { provide: IdGenerator, useValue: ids },
         { provide: AppConfigService, useValue: appConfig }, { provide: APP_FILTER, useClass: AllExceptionsFilter }],
-    }).compile();
+    }).overrideProvider(IdGenerator).useValue(ids).compile();
     app = module.createNestApplication({ logger: false, bodyParser: false });
     await configureHttpApp(app); await app.init(); output = '';
   });
@@ -72,6 +74,23 @@ describe('empresas HTTP con servicio y logging reales, sin PostgreSQL', () => {
       requestId: response.headers['x-request-id'], ...(field ? { field } : {}) } });
     secure(response);
   }
+  it.each(['development', 'test', 'production'] as const)('renovación en empresas respeta atributos de %s', async env => {
+    appConfig.env = env;
+    authenticate.mockResolvedValue({ ...session, expiresAt: new Date(now.getTime() + 3600500) });
+    const name = env === 'production' ? '__Host-agenda_session' : 'agenda_session';
+    const response = await get().set('Cookie', `${name}=${token}`).expect(200);
+    expect(Array.isArray(response.headers['set-cookie'])).toBe(true);
+    expect(response.headers['set-cookie']).toHaveLength(1);
+    expect(response.headers['set-cookie']).toEqual([
+      `${name}=${token}; Path=/; HttpOnly; ${env === 'production' ? 'Secure; ' : ''}SameSite=Lax; Max-Age=3600`,
+    ]);
+    expect(authenticate).toHaveBeenCalledWith(token); secure(response);
+  });
+  it('sin renovación no reemite cookie', async () => {
+    authenticate.mockResolvedValue({ ...session, renewed: false });
+    const response = await get().expect(200);
+    expect(response.headers['set-cookie']).toBeUndefined(); secure(response);
+  });
   it.each(['community_manager', 'worker', 'client'])('%s usa solo el alcance de sesión y proyecta campos públicos', async role => {
     authenticate.mockResolvedValue({ ...session, membership: { ...session.membership, role } });
     const response = await get().set('Origin', origin).set('X-Organization-Id', 'organización-ajena').set('X-Role', 'admin');

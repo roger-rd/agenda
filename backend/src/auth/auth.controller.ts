@@ -1,6 +1,5 @@
 import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { Clock } from '../common/clock/clock';
 import { ForbiddenError } from '../common/errors/domain-error';
 import { JsonBody } from '../common/http/content-type';
 import { readSessionCookie, serializeClearedSessionCookie, serializeSessionCookie, sessionCookieConfig } from '../common/http/cookies';
@@ -17,7 +16,7 @@ import { SessionService } from './session.service';
 @OriginProtected()
 export class AuthController {
   constructor(private readonly authentication: AuthenticationService, private readonly sessions: SessionService,
-    private readonly config: AppConfigService, private readonly clock: Clock) {}
+    private readonly config: AppConfigService) {}
 
   @Post('login')
   @JsonBody()
@@ -34,12 +33,8 @@ export class AuthController {
 
   @Get('session')
   @UseGuards(SessionAuthGuard)
-  session(@CurrentSession() current: CurrentSessionValue, @Res({ passthrough: true }) res: Response) {
+  session(@CurrentSession() current: CurrentSessionValue) {
     const { token, session } = current;
-    if (session.renewed) {
-      const maxAge = Math.max(1, Math.min(2678400, Math.floor((session.expiresAt.getTime() - this.clock.now().getTime()) / 1000)));
-      res.setHeader('Set-Cookie', serializeSessionCookie(sessionCookieConfig(this.config.env), token, maxAge));
-    }
     return { user: session.user, organization: session.organization, membership: session.membership,
       csrfToken: deriveCsrfToken(token), expiresAt: session.expiresAt.toISOString() };
   }

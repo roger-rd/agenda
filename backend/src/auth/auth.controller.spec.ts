@@ -12,6 +12,7 @@ import { JsonBody, JsonBodyGuard } from '../common/http/content-type';
 import { configureHttpApp } from '../common/http/configure-http-app';
 import { serializeClearedSessionCookie, serializeSessionCookie, sessionCookieConfig } from '../common/http/cookies';
 import { OriginGuard } from '../common/http/origin.guard';
+import { IdsModule } from '../common/ids/ids.module';
 import { IdGenerator } from '../common/ids/id-generator';
 import { AppConfigService } from '../config/app-config.service';
 import { deriveCsrfToken, generateSessionToken } from '../identity/session-token';
@@ -57,13 +58,13 @@ describe('HTTP de autenticación con logging real y servicios falsos', () => {
     const ids = { next: () => `peticion-${++sequence}` };
     const stream = new Writable({ write(chunk, _encoding, done) { output += String(chunk); done(); } });
     const module = await Test.createTestingModule({
-      imports: [LoggerModule.forRoot({ pinoHttp: createLoggerOptions({ logLevel: 'info' }, stream, ids), useExisting: true })],
+      imports: [IdsModule, LoggerModule.forRoot({ pinoHttp: createLoggerOptions({ logLevel: 'info' }, stream, ids), useExisting: true })],
       controllers: [AuthController, HealthController, RegistrationTestController],
       providers: [SessionAuthGuard,
         { provide: AuthenticationService, useValue: { login } }, { provide: SessionService, useValue: { authenticate, revoke } },
         { provide: Clock, useValue: { now: () => now } }, { provide: IdGenerator, useValue: ids },
         { provide: AppConfigService, useValue: appConfig }, { provide: APP_FILTER, useClass: AllExceptionsFilter }],
-    }).compile();
+    }).overrideProvider(IdGenerator).useValue(ids).compile();
     app = module.createNestApplication({ logger: false, bodyParser: false });
     await configureHttpApp(app); await app.init(); output = '';
   });
@@ -199,12 +200,11 @@ describe('HTTP de autenticación con logging real y servicios falsos', () => {
     authenticate.mockResolvedValue({ ...session, renewed });
     const response = await request(app.getHttpServer()).get('/api/v1/auth/session').set('Cookie', cookie).expect(200);
     expect(response.body).toEqual({ ...identity, csrfToken, expiresAt: expiresAt.toISOString() });
+    if (renewed) {
+      expect(Array.isArray(response.headers['set-cookie'])).toBe(true);
+      expect(response.headers['set-cookie']).toHaveLength(1);
+    }
     expect(response.headers['set-cookie']).toEqual(renewed ? [serializeSessionCookie(config, token, 3600)] : undefined); secure(response);
-  });
-  it.each([-1000, 999999999999])('limita Max-Age al renovar: %p', async delta => {
-    authenticate.mockResolvedValue({ ...session, renewed: true, expiresAt: new Date(now.getTime() + delta) });
-    const response = await request(app.getHttpServer()).get('/api/v1/auth/session').set('Cookie', cookie).expect(200);
-    expect(response.headers['set-cookie']).toEqual([serializeSessionCookie(config, token, delta < 0 ? 1 : 2678400)]); secure(response);
   });
   it.each(['post', 'put', 'delete'] as const)('%s session no está registrado', async method => {
     error(await request(app.getHttpServer())[method]('/api/v1/auth/session'), 404, 'not_found'); untouched();

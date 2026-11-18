@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { Clock } from '../common/clock/clock';
 import { Body, Controller, INestApplication, Post, UseGuards } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
@@ -31,6 +32,7 @@ const token = generateSessionToken(() => Buffer.alloc(32, 7));
 const cookie = `agenda_session=${token}`;
 const csrf = deriveCsrfToken(token);
 const origin = 'https://permitido.test';
+const now = new Date('2026-01-01T00:00:00Z');
 const session = { organization: { id: 'o1' }, membership: { id: 'm1', role: 'community_manager' } };
 
 describe('Origin → JSON/415 → cookie → CSRF → authenticate → rol → validación → servicio', () => {
@@ -45,7 +47,7 @@ describe('Origin → JSON/415 → cookie → CSRF → authenticate → rol → v
     const module = await Test.createTestingModule({
       imports: [IdsModule, LoggerModule.forRoot({ pinoHttp: createLoggerOptions({ logLevel: 'info' }, stream, ids), useExisting: true })],
       controllers: [RoleTestController],
-      providers: [SessionAuthGuard, RoleGuard, { provide: SessionService, useValue: { authenticate } },
+      providers: [{ provide: Clock, useValue: { now: () => now } }, SessionAuthGuard, RoleGuard, { provide: SessionService, useValue: { authenticate } },
         { provide: AppConfigService, useValue: { env: 'test', logLevel: 'info', allowedOrigins: [origin] } },
         { provide: APP_FILTER, useClass: AllExceptionsFilter }],
     }).overrideProvider(IdGenerator).useValue(ids).compile();
@@ -60,7 +62,8 @@ describe('Origin → JSON/415 → cookie → CSRF → authenticate → rol → v
     expect(output).toContain('Solicitud finalizada.');
   }
   it('Origin rechazado → 403 antes de JSON/415, cookie, CSRF y authenticate', async () => {
-    rejected(await post().set('Origin', 'null').type('text').send('texto'), 403);
+    const response = await post().set('Origin', 'null').type('text').send('texto');
+    rejected(response, 403); expect(response.headers['set-cookie']).toBeUndefined();
     expect(authenticate).not.toHaveBeenCalled();
   });
   it('JSON/415 precede a cookie, CSRF y authenticate', async () => {
@@ -74,16 +77,21 @@ describe('Origin → JSON/415 → cookie → CSRF → authenticate → rol → v
   it.each([undefined, 'incorrecto'])('CSRF %p → 403 antes de authenticate y de la base', async value => {
     const req = post().set('Cookie', cookie).send({});
     if (value !== undefined) req.set('X-CSRF-Token', value);
-    rejected(await req, 403); expect(authenticate).not.toHaveBeenCalled();
+    const response = await req;
+    rejected(response, 403); expect(response.headers['set-cookie']).toBeUndefined(); expect(authenticate).not.toHaveBeenCalled();
   });
   it('authenticate rechaza cookie sin sesión vigente → 401 antes del rol', async () => {
     authenticate.mockResolvedValue(null);
     rejected(await authorized().send({}), 401); expect(authenticate).toHaveBeenCalledTimes(1);
   });
   it.each(['worker', 'client'])('authenticate → rol %s con cuerpo inválido → 403, antes de validación y servicio', async role => {
-    // Puede haber lectura y renovación de user_sessions: el rechazo por rol ocurre DESPUÉS de autenticar la sesión.
-    authenticate.mockResolvedValue({ ...session, membership: { id: 'm1', role } });
-    rejected(await authorized().send({ name: 123, extra: true }), 403);
+    // La sesión ya se renovó en servidor: el rechazo posterior por rol conserva la cookie reemitida.
+    authenticate.mockResolvedValue({ ...session, renewed: true, expiresAt: new Date(now.getTime() + 12500), membership: { id: 'm1', role } });
+    const response = await authorized().send({ name: 123, extra: true });
+    rejected(response, 403);
+    expect(response.headers['set-cookie']).toEqual([
+      `agenda_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=12`,
+    ]);
     expect(authenticate).toHaveBeenCalledTimes(1); expect(authenticate).toHaveBeenCalledWith(token);
   });
   it.each([{}, { name: 123 }, { name: 'Empresa', extra: true }])('community_manager: authenticate → rol → validación inválida %p → 400 sin servicio', async body => {
