@@ -20,7 +20,7 @@ import { formatAuthFailure } from './auth-failure';
 
 type Context = { app: INestApplication; observer: DataSource; gate: DeleteGate; saved: RegistrationResult[];
   seeded: CompaniesSaved; reservations: ReturnType<typeof companiesMarkers>; ready: boolean };
-type Item = { id: string; name: string; color: string };
+type Item = { id: string; name: string; color: string; version: number };
 type Page = { items: Item[]; nextCursor: string | null };
 type Ordered = { id: string; name_key: string };
 const keys = (value: object, expected: string[]) => JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...expected].sort());
@@ -108,7 +108,8 @@ export function registerCompaniesTest(context: () => Context): void {
         expect(keys(page, ['items', 'nextCursor']) && Array.isArray(page.items)).toBe(true);
         expect(page.nextCursor === null || typeof page.nextCursor === 'string').toBe(true);
         for (const item of page.items) {
-          expect(keys(item, ['id', 'name', 'color'])).toBe(true);
+          expect(keys(item, ['id', 'name', 'color', 'version'])).toBe(true);
+          expect(Number.isInteger(item.version) && item.version === 1).toBe(true);
           const seed = fixture.companies.find(c => companyIds.get(c.key) === item.id);
           expect(!!seed && item.name === seed.name && item.color === seed.color).toBe(true);
         }

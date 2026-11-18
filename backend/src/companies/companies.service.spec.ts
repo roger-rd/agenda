@@ -11,8 +11,8 @@ describe('consultas de empresas sin conexión', () => {
   const service = new CompaniesService({ query } as unknown as Repository<Company>);
   beforeEach(() => { query.mockReset(); });
   it('fija ambas consultas completas y sus parámetros de aislamiento', () => {
-    expect(LIST_COMPANIES_SQL).toBe('SELECT c.id, c.name, c.color, c.name_key FROM public.companies c WHERE c.organization_id = $1 AND ($2::text IS NULL OR (c.name_key, c.id) > ($2::text, $3::uuid)) ORDER BY c.name_key, c.id LIMIT $4');
-    expect(LIST_ACCESSIBLE_COMPANIES_SQL).toBe('SELECT c.id, c.name, c.color, c.name_key FROM public.companies c JOIN public.company_accesses a ON a.company_id = c.id AND a.organization_id = c.organization_id WHERE c.organization_id = $1 AND a.organization_id = $1 AND a.membership_id = $5 AND ($2::text IS NULL OR (c.name_key, c.id) > ($2::text, $3::uuid)) ORDER BY c.name_key, c.id LIMIT $4');
+    expect(LIST_COMPANIES_SQL).toBe('SELECT c.id, c.name, c.color, c.version, c.name_key FROM public.companies c WHERE c.organization_id = $1 AND ($2::text IS NULL OR (c.name_key, c.id) > ($2::text, $3::uuid)) ORDER BY c.name_key, c.id LIMIT $4');
+    expect(LIST_ACCESSIBLE_COMPANIES_SQL).toBe('SELECT c.id, c.name, c.color, c.version, c.name_key FROM public.companies c JOIN public.company_accesses a ON a.company_id = c.id AND a.organization_id = c.organization_id WHERE c.organization_id = $1 AND a.organization_id = $1 AND a.membership_id = $5 AND ($2::text IS NULL OR (c.name_key, c.id) > ($2::text, $3::uuid)) ORDER BY c.name_key, c.id LIMIT $4');
   });
   it.each(['community_manager', 'worker', 'client'] as const)('recorre todas las páginas de %s sin omitir ni repetir', async role => {
     const scope: CompaniesScope = { role, organizationId: "organización-'privada", membershipId: 'membresía-privada' };
@@ -31,7 +31,7 @@ describe('consultas de empresas sin conexión', () => {
         expect(sql).toContain('a.membership_id = $5');
       }
       expect(sql).not.toContain(scope.organizationId); expect(sql).not.toContain(scope.membershipId);
-      expect(result.items).toEqual(rows.slice(page * 2, page * 2 + 2).map(({ id, name, color }) => ({ id, name, color })));
+      expect(result.items).toEqual(rows.slice(page * 2, page * 2 + 2).map(({ id, name, color, version }) => ({ id, name, color, version })));
       received.push(...result.items.map(item => item.id));
       if (page < 2) expect(result.nextCursor).toBe(encodeCursor({ nameKey: rows[page * 2 + 1].name_key, id: rows[page * 2 + 1].id }));
       else expect(result.nextCursor).toBeNull();

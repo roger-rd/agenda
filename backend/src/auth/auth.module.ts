@@ -9,6 +9,7 @@ import { OrganizationMembership } from '../persistence/entities/organization-mem
 import { UserSession } from '../persistence/entities/user-session.entity';
 import { DataSourceTransactionRunner, TransactionRunner } from '../registration/transaction-runner';
 import { AuthController } from './auth.controller';
+import { RoleGuard } from './role.guard';
 import { SessionAuthGuard } from './session-auth.guard';
 import { AuthenticationService, SESSION_TOKEN_FACTORY } from './authentication.service';
 import { SessionService } from './session.service';
@@ -16,8 +17,8 @@ import { SessionService } from './session.service';
 @Module({
   imports: [IdentityModule, ClockModule, TypeOrmModule.forFeature([User, Organization, OrganizationMembership, UserSession])],
   controllers: [AuthController],
-  providers: [SessionAuthGuard, SessionService, AuthenticationService, { provide: TransactionRunner, useClass: DataSourceTransactionRunner },
+  providers: [SessionAuthGuard, RoleGuard, SessionService, AuthenticationService, { provide: TransactionRunner, useClass: DataSourceTransactionRunner },
     { provide: SESSION_TOKEN_FACTORY, useValue: () => generateSessionToken() }],
-  exports: [AuthenticationService, SessionService, SessionAuthGuard],
+  exports: [AuthenticationService, SessionService, SessionAuthGuard, RoleGuard],
 })
 export class AuthModule {}

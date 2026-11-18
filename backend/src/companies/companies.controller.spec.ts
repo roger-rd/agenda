@@ -76,7 +76,7 @@ describe('empresas HTTP con servicio y logging reales, sin PostgreSQL', () => {
     authenticate.mockResolvedValue({ ...session, membership: { ...session.membership, role } });
     const response = await get().set('Origin', origin).set('X-Organization-Id', 'organización-ajena').set('X-Role', 'admin');
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ items: [{ id, name: row.name, color: row.color }], nextCursor: null });
+    expect(response.body).toEqual({ items: [{ id, name: row.name, color: row.color, version: row.version }], nextCursor: null });
     expect(query).toHaveBeenCalledWith(role === 'community_manager' ? LIST_COMPANIES_SQL : LIST_ACCESSIBLE_COMPANIES_SQL,
       [session.organization.id, null, null, 21, ...(role === 'community_manager' ? [] : [session.membership.id])]);
     expect(authenticate).toHaveBeenCalledWith(token); secure(response);
