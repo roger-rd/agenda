@@ -1,3 +1,10 @@
+import { Clock } from '../common/clock/clock';
+import { ForbiddenError, InvalidInputError } from '../common/errors/domain-error';
+import { IdGenerator } from '../common/ids/id-generator';
+import { TransactionRunner } from '../registration/transaction-runner';
+import { CreateCompanyDto } from './create-company.dto';
+import { normalizeCompanyName, normalizeCompanyColor } from './company-input';
+import { translateCompanyWriteError } from './company-errors';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -12,7 +19,25 @@ interface CompanyRow { id: string; name: string; color: string; version: number;
 
 @Injectable()
 export class CompaniesService {
-  constructor(@InjectRepository(Company) private readonly repository: Repository<Company>) {}
+  constructor(@InjectRepository(Company) private readonly repository: Repository<Company>,
+    private readonly runner: TransactionRunner, private readonly ids: IdGenerator, private readonly clock: Clock) {}
+
+  async create(scope: CompaniesScope, dto: CreateCompanyDto) {
+    if (scope.role !== 'community_manager') throw new ForbiddenError('Acceso denegado.');
+    const normalized = normalizeCompanyName(dto.name);
+    if (normalized === null) throw new InvalidInputError('Datos de entrada inválidos.', 'name');
+    const color = normalizeCompanyColor(dto.color);
+    if (color === null) throw new InvalidInputError('Datos de entrada inválidos.', 'color');
+    const { name, nameKey } = normalized;
+    const id = this.ids.next();
+    const now = this.clock.now();
+    try {
+      await this.runner.run(manager => manager.insert(Company, {
+        id, organizationId: scope.organizationId, name, nameKey, color, version: 1, createdAt: now, updatedAt: now,
+      }));
+      return { id, name, color, version: 1 };
+    } catch (error) { throw translateCompanyWriteError(error); }
+  }
 
   async list(scope: CompaniesScope, query: ListCompaniesQuery) {
     const cursor = query.cursor === undefined ? null : decodeCursor(query.cursor);

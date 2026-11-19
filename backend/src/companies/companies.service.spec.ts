@@ -1,4 +1,5 @@
-import type { Repository } from 'typeorm';
+import { ForbiddenError, InvalidInputError } from '../common/errors/domain-error';
+import type { EntityManager, Repository } from 'typeorm';
 import { Company } from '../persistence/entities/company.entity';
 import { decodeCursor, encodeCursor } from './companies-cursor';
 import { CompaniesService, LIST_ACCESSIBLE_COMPANIES_SQL, LIST_COMPANIES_SQL } from './companies.service';
@@ -8,7 +9,7 @@ const rows = Array.from({ length: 5 }, (_, index) => ({ id: `01900000-0000-7000-
   name: `Empresa ${index}`, name_key: `empresa ${index}`, color: '#112233', version: 1, organization_id: 'privada' }));
 describe('consultas de empresas sin conexión', () => {
   const query = jest.fn();
-  const service = new CompaniesService({ query } as unknown as Repository<Company>);
+  const service = new CompaniesService({ query } as unknown as Repository<Company>, { run: jest.fn() }, { next: jest.fn() }, { now: jest.fn() });
   beforeEach(() => { query.mockReset(); });
   it('fija ambas consultas completas y sus parámetros de aislamiento', () => {
     expect(LIST_COMPANIES_SQL).toBe('SELECT c.id, c.name, c.color, c.version, c.name_key FROM public.companies c WHERE c.organization_id = $1 AND ($2::text IS NULL OR (c.name_key, c.id) > ($2::text, $3::uuid)) ORDER BY c.name_key, c.id LIMIT $4');
@@ -51,5 +52,35 @@ describe('consultas de empresas sin conexión', () => {
     const failure = { severity: 'ERROR', code: '08006' };
     query.mockRejectedValue(failure);
     await expect(service.list(scope, { limit: 2 })).rejects.toBe(failure);
+  });
+});
+
+describe('creación de empresas sin conexión', () => {
+  const scope: CompaniesScope = { role: 'community_manager', organizationId: 'organización', membershipId: 'membresía' };
+  const now = new Date('2026-01-01T00:00:00Z');
+  const id = '01900000-0000-7000-8000-000000000001';
+  const insert = jest.fn();
+  const run = jest.fn(async work => work({ insert } as unknown as EntityManager));
+  const service = new CompaniesService({} as Repository<Company>, { run }, { next: () => id }, { now: () => now });
+  beforeEach(() => { insert.mockReset().mockResolvedValue({}); run.mockClear(); });
+  it('normaliza y escribe exclusivamente el alcance de sesión', async () => {
+    expect(await service.create(scope, { name: '  ÁRBOL   Ñandú Москва ', color: '#AaBBcc' }))
+      .toEqual({ id, name: 'ÁRBOL Ñandú Москва', color: '#aabbcc', version: 1 });
+    expect(insert).toHaveBeenCalledWith(Company, { id, organizationId: scope.organizationId,
+      name: 'ÁRBOL Ñandú Москва', nameKey: 'arbol nandu москва', color: '#aabbcc', version: 1, createdAt: now, updatedAt: now });
+    expect(run).toHaveBeenCalledTimes(1); expect(insert).toHaveBeenCalledTimes(1);
+  });
+  it.each(['worker', 'client', 'admin'])('deniega %s antes de validar', async role => {
+    await expect(service.create({ ...scope, role: role as CompaniesScope['role'] }, { name: '', color: '' })).rejects.toEqual(new ForbiddenError('Acceso denegado.'));
+    expect(run).not.toHaveBeenCalled();
+  });
+  it.each([['', '', 'name'], ['Empresa', '', 'color']])('valida nombre antes de color (%s)', async (name, color, field) => {
+    await expect(service.create(scope, { name, color })).rejects.toEqual(new InvalidInputError('Datos de entrada inválidos.', field));
+    expect(run).not.toHaveBeenCalled();
+  });
+  it.each(['55P03', '57014', '08006'])('no reintenta %s', async code => {
+    insert.mockRejectedValue({ severity: 'ERROR', code });
+    await expect(service.create(scope, { name: 'Empresa', color: '#112233' })).rejects.toThrow();
+    expect(run).toHaveBeenCalledTimes(1); expect(insert).toHaveBeenCalledTimes(1);
   });
 });

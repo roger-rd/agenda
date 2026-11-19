@@ -1,3 +1,4 @@
+import { TransactionRunner } from '../registration/transaction-runner';
 import 'reflect-metadata';
 import { Clock } from '../common/clock/clock';
 import { Controller, Get, INestApplication } from '@nestjs/common';
@@ -51,7 +52,7 @@ describe('empresas HTTP con servicio y logging reales, sin PostgreSQL', () => {
     const module = await Test.createTestingModule({
       imports: [IdsModule, LoggerModule.forRoot({ pinoHttp: createLoggerOptions({ logLevel: 'info' }, stream, ids), useExisting: true })],
       controllers: [CompaniesController, HealthController],
-      providers: [{ provide: Clock, useValue: { now: () => now } }, CompaniesService, SessionAuthGuard,
+      providers: [{ provide: Clock, useValue: { now: () => now } }, CompaniesService, SessionAuthGuard, { provide: TransactionRunner, useValue: { run: jest.fn() } },
         { provide: 'CompanyRepository', useValue: { query } },
         { provide: SessionService, useValue: { authenticate } }, { provide: IdGenerator, useValue: ids },
         { provide: AppConfigService, useValue: appConfig }, { provide: APP_FILTER, useClass: AllExceptionsFilter }],

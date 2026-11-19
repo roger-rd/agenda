@@ -1,3 +1,4 @@
+import { DataSourceTransactionRunner, TransactionRunner } from '../registration/transaction-runner';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
@@ -8,7 +9,7 @@ import { CompaniesService } from './companies.service';
 
 @Module({
   imports: [AuthModule, TypeOrmModule.forFeature([Company, CompanyAccess])],
-  providers: [CompaniesService],
+  providers: [CompaniesService, { provide: TransactionRunner, useClass: DataSourceTransactionRunner }],
   controllers: [CompaniesController],
 })
 export class CompaniesModule {}

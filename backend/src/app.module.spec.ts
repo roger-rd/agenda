@@ -72,6 +72,7 @@ describe('AppModule', () => {
       expect(Reflect.getMetadata(PATH_METADATA, CompaniesController)).toBe('companies');
       expect(Reflect.getMetadata(PATH_METADATA, CompaniesController.prototype.list)).toBe('/');
       expect(Reflect.getMetadata(METHOD_METADATA, CompaniesController.prototype.list)).toBe(RequestMethod.GET);
+      expect(Reflect.getMetadata(METHOD_METADATA, CompaniesController.prototype.create)).toBe(RequestMethod.POST);
       expect(app).toBeDefined();
     } finally {
       await app.close();
