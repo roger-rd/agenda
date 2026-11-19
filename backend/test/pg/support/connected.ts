@@ -1,3 +1,5 @@
+import { registerCompaniesWriteTest } from './http-companies-write';
+import { companiesWriteMarkers, companiesWriteCleanupTargets, companiesWriteCleanupSQL } from './companies-write-fixture';
 import { registerCompaniesTest } from './http-companies';
 import { companiesMarkers, companiesCleanupSQL, companiesCleanupTargets, type CompaniesSaved } from './companies-fixture';
 import { Clock } from '../../../src/common/clock/clock';
@@ -43,7 +45,7 @@ type Session = { pid: number; backend_start: Date };
 const failure = (error: unknown) => error instanceof DatabaseOperationError ? error.failure : classifyDatabaseError(error);
 
 export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
-  if (phase === 'auth') assertAuthOrigin(process.env.APP_ALLOWED_ORIGINS);
+  if (phase === 'auth' || phase === 'companies-write') assertAuthOrigin(process.env.APP_ALLOWED_ORIGINS);
   describe(`B2B ${phase}`, () => {
     const id = runId(), gate = new DeleteGate(phase), saved: RegistrationResult[] = [];
     const httpTargets = phase === 'http' ? httpCleanupTargets(id) : undefined;
@@ -51,6 +53,8 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
     const companiesTargets = phase === 'companies' ? companiesCleanupTargets(id) : undefined;
     const companiesReservations = phase === 'companies' ? companiesMarkers(id) : undefined;
     const companiesSaved: CompaniesSaved = { users: [], memberships: [], companies: [] };
+    const companiesWriteReservations = phase === 'companies-write' ? companiesWriteMarkers(id) : undefined;
+    const companiesWriteTargets = phase === 'companies-write' ? companiesWriteCleanupTargets(id) : undefined;
     let clock: ControlledClock;
     let observer: DataSource | undefined, source: DataSource, app: INestApplication | undefined, moduleRef: TestingModule | undefined;
     let service: RegistrationService, sequence = 0, ready = false;
@@ -71,6 +75,7 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
     async function cleanup(): Promise<void> {
       gate.assertArmed(); validateRunId(id);
       const userIds = saved.map(r => r.user.id), orgIds = saved.map(r => r.organization.id);
+      if (companiesWriteTargets) { await cleanupCompaniesWrite(userIds, orgIds); return; }
       if (companiesTargets) { await cleanupCompanies(userIds, orgIds); return; }
       if (authTargets) {
         await observer!.query('DELETE FROM public.user_sessions WHERE user_id = ANY($1::uuid[])', [userIds]);
@@ -118,6 +123,29 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
       await observer!.query(companiesCleanupSQL.users, [emails]);
       await observer!.query(companiesCleanupSQL.organizations, [organizationNames]);
       await empty();
+    }
+    async function cleanupCompaniesWrite(userIds: string[], orgIds: string[]): Promise<void> {
+      gate.assertArmed();
+      if (!companiesWriteTargets) throw new Error('companies-write requiere reservas');
+      const users = [...userIds, ...companiesSaved.users], memberships = [...saved.map(r => r.membership.id), ...companiesSaved.memberships];
+      try {
+        await observer!.query('DELETE FROM public.user_sessions WHERE user_id = ANY($1::uuid[])', [users]);
+        await observer!.query('DELETE FROM public.company_accesses WHERE membership_id = ANY($1::uuid[]) OR company_id = ANY($2::uuid[])', [memberships, companiesSaved.companies]);
+        await observer!.query('DELETE FROM public.companies WHERE id = ANY($1::uuid[])', [companiesSaved.companies]);
+        await observer!.query('DELETE FROM public.organization_memberships WHERE id = ANY($1::uuid[])', [memberships]);
+        await observer!.query('DELETE FROM public.users WHERE id = ANY($1::uuid[])', [users]);
+        await observer!.query('DELETE FROM public.organizations WHERE id = ANY($1::uuid[])', [orgIds]);
+      } finally {
+        // Exact reservations also cover committed requests whose response was lost.
+        const { emails, organizationNames } = companiesWriteTargets;
+        await observer!.query(companiesWriteCleanupSQL.sessions, [emails]);
+        await observer!.query(companiesWriteCleanupSQL.accesses, [emails, organizationNames]);
+        await observer!.query(companiesWriteCleanupSQL.companies, [organizationNames]);
+        await observer!.query(companiesWriteCleanupSQL.memberships, [emails, organizationNames]);
+        await observer!.query(companiesWriteCleanupSQL.users, [emails]);
+        await observer!.query(companiesWriteCleanupSQL.organizations, [organizationNames]);
+        await empty();
+      }
     }
     async function register(value: ReturnType<typeof input>, target = service): Promise<RegistrationResult> {
       gate.assertArmed(); const result = await target.register(value); saved.push(result); return result;
@@ -182,7 +210,7 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
         const migrations = await observer.query(fingerprintSQL, [['schema_migrations']]);
         console.info('[b2b] huella schema_migrations (referencia 3/1/1)', migrations);
         assertFingerprint('schema_migrations', migrations[0], migrationFingerprint);
-        if (phase === 'auth') {
+        if (phase === 'auth' || phase === 'companies-write') {
           const roles: { pg_get_constraintdef: string }[] = await observer.query("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'CK_organization_memberships_role'");
           expect(roles.length === 1 && roles[0].pg_get_constraintdef.includes("'worker'")).toBe(true);
         }
@@ -198,9 +226,14 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
         beforePids = new Set((await observer.query(sessionSQL) as Session[]).map(s => s.pid));
         const { AppModule } = await import('../../../src/app.module');
         clock = new ControlledClock();
+        if (phase === 'companies-write') {
+          moduleRef = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(Clock).useValue(clock).compile();
+        } else {
+          // Preserve the existing auth/companies construction and its offline contract.
         moduleRef = phase === 'auth'
           ? await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(Clock).useValue(clock).compile()
           : await Test.createTestingModule({ imports: [AppModule] }).compile();
+        }
         app = moduleRef.createNestApplication(); await configureHttpApp(app); await app.init();
         source = app.get(DataSource);
         if (phase === 'readonly') {
@@ -225,10 +258,13 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
       afterAll(async () => { try { if (gate.isArmed && observer?.isInitialized) await cleanup(); } finally { await close(); } });
     } else if (phase === 'auth' || phase === 'companies') {
       afterAll(async () => { try { if (gate.isArmed && observer?.isInitialized) await cleanup(); } finally { await close(); } });
+    } else if (phase === 'companies-write') {
+      afterAll(async () => { try { if (gate.isArmed && observer?.isInitialized) await cleanup(); } finally { await close(); } });
     } else {
       afterAll(close); // readonly never registers a cleanup hook.
     }
     test('preflight y AppModule reales', () => expect(ready).toBe(true));
+    if (phase === 'companies-write') registerCompaniesWriteTest(() => ({ app: app!, observer: observer!, clock, gate, saved, seeded: companiesSaved, reservations: companiesWriteReservations!, ready }));
     if (phase === 'companies') registerCompaniesTest(() => ({ app: app!, observer: observer!, gate, saved, seeded: companiesSaved, reservations: companiesReservations!, ready }));
     if (phase === 'auth') registerAuthTest(() => ({ app: app!, observer: observer!, source, clock, gate, saved, id, ready }));
     if (phase === 'http') registerHttpTest(() => ({ app: app!, observer: observer!, gate, saved, id, ready, counts, credentials: input('http') }));

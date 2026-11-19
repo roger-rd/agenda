@@ -1,8 +1,8 @@
-export type Phase = 'offline' | 'readonly' | 'dml' | 'http' | 'auth' | 'companies';
+export type Phase = 'offline' | 'readonly' | 'dml' | 'http' | 'auth' | 'companies' | 'companies-write';
 export function parsePhase(value: unknown, nodeEnv: unknown): Phase {
   if (value === 'cleanup') throw new Error('fase cleanup requiere autorización específica');
-  if (value !== 'offline' && value !== 'readonly' && value !== 'dml' && value !== 'http' && value !== 'auth' && value !== 'companies') {
-    throw new Error('AGENDA_B2B_PHASE obligatoria: offline, readonly, dml, http, auth o companies (antes de importar pg/typeorm o leer DATABASE_*)');
+  if (value !== 'offline' && value !== 'readonly' && value !== 'dml' && value !== 'http' && value !== 'auth' && value !== 'companies' && value !== 'companies-write') {
+    throw new Error('AGENDA_B2B_PHASE obligatoria: offline, readonly, dml, http, auth, companies o companies-write (antes de importar pg/typeorm o leer DATABASE_*)');
   }
   if (nodeEnv !== 'test') throw new Error('NODE_ENV debe ser test');
   return value;

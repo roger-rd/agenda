@@ -1,3 +1,4 @@
+import { registerCompaniesWriteOfflineTests } from './support/companies-write-offline';
 import { registerCompaniesOfflineTests } from './support/companies-offline';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,6 +15,7 @@ import { registerAuthOfflineTests } from './support/auth-offline';
 
 const phase = parsePhase(process.env.AGENDA_B2B_PHASE, process.env.NODE_ENV);
 if (phase === 'offline') {
+  registerCompaniesWriteOfflineTests();
   registerAuthOfflineTests();
   registerCompaniesOfflineTests();
   describe('B2B offline (sin DATABASE_* ni conexiones)', () => {
