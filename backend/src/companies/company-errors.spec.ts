@@ -26,3 +26,22 @@ describe('errores de escritura de empresas', () => {
     expect(JSON.stringify(wrapped)).not.toContain('secreto');
   });
 });
+
+describe('contexto de edición de empresas', () => {
+  it.each(['23514', '55P03', '57014', '08006', 'ECONNRESET'])('conserva el fallo %s y contexto update', code => {
+    const failure = translateCompanyWriteError({ severity: 'ERROR', code }, 'update') as DatabaseOperationError;
+    expect(failure.context).toEqual({ operation: 'update', atomic: true, valuesOrigin: 'request' });
+    const wrapped = translateCompanyWriteError(failure, 'update') as DatabaseOperationError;
+    expect(wrapped.failure).toEqual(failure.failure); expect(wrapped.context).toEqual(failure.context);
+    expect(mapDatabaseFailure(failure.failure, { method: 'PATCH', registry: new ConstraintRegistry(), context: failure.context }))
+      .toMatchObject({ status: code === '23514' ? 400 : 503,
+        code: code === '23514' ? 'invalid_input' : ['08006', 'ECONNRESET'].includes(code) ? 'outcome_unknown' : 'service_unavailable' });
+  });
+  it('preserva errores de dominio y traduce la unicidad exacta al editar', () => {
+    for (const error of [new ForbiddenError(), new ConflictError('Desactualizado')]) {
+      expect(translateCompanyWriteError(error, 'update')).toBe(error);
+    }
+    expect(translateCompanyWriteError({ severity: 'ERROR', code: '23505', constraint: 'UQ_companies_org_name_key' }, 'update'))
+      .toEqual(new ConflictError('El nombre de empresa ya está registrado.', 'name'));
+  });
+});

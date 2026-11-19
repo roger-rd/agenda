@@ -1,8 +1,10 @@
-import { ForbiddenError, InvalidInputError } from '../common/errors/domain-error';
+import { UpdateCompanyDto } from './update-company.dto';
+import { STALE } from '../database/errors/database-http';
+import { ConflictError, ForbiddenError, InvalidInputError, NotFoundError } from '../common/errors/domain-error';
 import type { EntityManager, Repository } from 'typeorm';
 import { Company } from '../persistence/entities/company.entity';
 import { decodeCursor, encodeCursor } from './companies-cursor';
-import { CompaniesService, LIST_ACCESSIBLE_COMPANIES_SQL, LIST_COMPANIES_SQL } from './companies.service';
+import { CompaniesService, UPDATE_COMPANY_SQL, SELECT_COMPANY_SQL, LIST_ACCESSIBLE_COMPANIES_SQL, LIST_COMPANIES_SQL } from './companies.service';
 import type { CompaniesScope } from './companies-scope';
 
 const rows = Array.from({ length: 5 }, (_, index) => ({ id: `01900000-0000-7000-8000-00000000000${index}`,
@@ -82,5 +84,66 @@ describe('creación de empresas sin conexión', () => {
     insert.mockRejectedValue({ severity: 'ERROR', code });
     await expect(service.create(scope, { name: 'Empresa', color: '#112233' })).rejects.toThrow();
     expect(run).toHaveBeenCalledTimes(1); expect(insert).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('edición de empresas sin conexión', () => {
+  const scope: CompaniesScope = { role: 'community_manager', organizationId: 'organización', membershipId: 'membresía' };
+  const id = '01900000-0000-7000-8000-000000000001';
+  const now = new Date('2026-01-01T00:00:00Z');
+  const query = jest.fn();
+  const run = jest.fn(async work => work({ query } as unknown as EntityManager));
+  const service = new CompaniesService({} as Repository<Company>, { run }, { next: jest.fn() }, { now: () => now });
+  const row = { id, name: 'Empresa', color: '#112233', version: 2 };
+  beforeEach(() => { query.mockReset(); run.mockClear(); });
+  it('fija el SQL completo de actualización y diagnóstico', () => {
+    expect(UPDATE_COMPANY_SQL).toBe('UPDATE public.companies SET name = COALESCE($3::text, name), name_key = COALESCE($4::text, name_key), color = COALESCE($5::text, color), version = version + 1, updated_at = $6 WHERE id = $1 AND organization_id = $2 AND version = $7 AND (name, color) IS DISTINCT FROM (COALESCE($3::text, name), COALESCE($5::text, color)) RETURNING id, name, color, version');
+    expect(SELECT_COMPANY_SQL).toBe('SELECT id, name, color, version FROM public.companies WHERE id = $1 AND organization_id = $2');
+  });
+  it.each([
+    [{ version: 1, name: '  ÁRBOL   Ñandú Москва ' }, 'ÁRBOL Ñandú Москва', 'arbol nandu москва', null],
+    [{ version: 1, color: '#AaBBcc' }, null, null, '#aabbcc'],
+    [{ version: 1, name: 'Empresa', color: '#112233' }, 'Empresa', 'empresa', '#112233'],
+  ])('normaliza solo lo presente %p y usa RETURNING', async (dto, name, key, color) => {
+    query.mockResolvedValue([[row], 1]);
+    await expect(service.update(scope, id, dto)).resolves.toEqual(row);
+    expect(query).toHaveBeenCalledWith(UPDATE_COMPANY_SQL, [id, scope.organizationId, name, key, color, now, 1]);
+    expect(query).toHaveBeenCalledTimes(1); expect(run).toHaveBeenCalledTimes(1);
+  });
+  it.each(['worker', 'client', 'admin'])('defiende rol %s antes de validar', async role => {
+    await expect(service.update({ ...scope, role: role as CompaniesScope['role'] }, 'inválido', { version: 1 }))
+      .rejects.toEqual(new ForbiddenError('Acceso denegado.'));
+    expect(run).not.toHaveBeenCalled();
+  });
+  it.each([
+    [{ version: 1 }, undefined], [{ version: 1, name: null }, 'name'], [{ version: 1, color: null }, 'color'],
+    [{ version: 1, name: '', color: '' }, 'name'], [{ version: 1, color: '#fff' }, 'color'],
+  ])('valida cuerpo antes del id %p', async (dto, field) => {
+    await expect(service.update(scope, 'inválido', dto as unknown as UpdateCompanyDto))
+      .rejects.toEqual(new InvalidInputError('Datos de entrada inválidos.', field));
+    expect(run).not.toHaveBeenCalled();
+  });
+  it.each(['texto', '01900000-0000-7000-8000-00000000000A', '01900000-0000-0000-8000-000000000001'])('rechaza id %s sin consulta', async target => {
+    await expect(service.update(scope, target, { version: 1, name: 'Empresa' })).rejects.toEqual(new NotFoundError());
+    expect(run).not.toHaveBeenCalled();
+  });
+  it.each([
+    [[], new NotFoundError()], [[row], new ConflictError(STALE)],
+    [[{ ...row, version: 1, name: 'Diferente' }], new ConflictError(STALE)],
+  ])('diagnóstico conservador %p', async (result, failure) => {
+    query.mockResolvedValueOnce([[], 0]).mockResolvedValueOnce(result);
+    await expect(service.update(scope, id, { version: 1, name: 'Empresa' })).rejects.toEqual(failure);
+    expect(query).toHaveBeenNthCalledWith(2, SELECT_COMPANY_SQL, [id, scope.organizationId]);
+    expect(query).toHaveBeenCalledTimes(2); expect(run).toHaveBeenCalledTimes(1);
+  });
+  it.each([{ version: 2, name: '  Empresa  ' }, { version: 2, color: '#112233' }])('sin cambios devuelve fila actual %p', async dto => {
+    query.mockResolvedValueOnce([[], 0]).mockResolvedValueOnce([row]);
+    await expect(service.update(scope, id, dto)).resolves.toEqual(row);
+    expect(query).toHaveBeenCalledTimes(2); expect(run).toHaveBeenCalledTimes(1);
+  });
+  it.each(['55P03', '57014', '08006', '23514', '23505'])('no reintenta ni diagnostica tras error %s', async code => {
+    query.mockRejectedValue({ severity: 'ERROR', code, constraint: 'UQ_companies_org_name_key' });
+    await expect(service.update(scope, id, { version: 1, name: 'Empresa' })).rejects.toThrow();
+    expect(query).toHaveBeenCalledTimes(1); expect(run).toHaveBeenCalledTimes(1);
   });
 });
