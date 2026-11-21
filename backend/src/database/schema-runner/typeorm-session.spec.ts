@@ -15,6 +15,8 @@ const password = 'fake-owner-password-for-unit-tests-0004';
 const logger = new SafeTypeOrmLogger({ warn: jest.fn(), error: jest.fn(), debug: jest.fn() });
 const config = new DatabaseConnectionConfig('127.0.0.1', 5433, 'agenda_test', new DatabaseCredentials('agenda_test_owner', password), 1);
 const NAME = SCHEMA_MANIFEST[0].name;
+const NAMES = SCHEMA_MANIFEST.map(e => e.name);
+const ALL_UP = SCHEMA_MANIFEST.flatMap(e => [...e.up]);
 
 interface World { migrationsTable: boolean; tables: boolean; executed: { id: number; timestamp: number; name: string }[]; tx: 'I' | 'T' | 'E' }
 const TABLE_PRIVS = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'];
@@ -22,6 +24,8 @@ const TABLE_PRIVS = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERE
 /** Rows for the pinned statements, from the same world the library mutates. */
 function pinned(text: string, world: World, mode: SchemaCommand): unknown[] | undefined {
   const ro = mode === 'plan' ? 'on' : 'off';
+  const prefix = SCHEMA_MANIFEST.slice(0, world.executed.length);
+  const currentTables = prefix.flatMap(e => [...e.tables]);
   switch (text) {
     case SQL.LOCK_SQL: return [{ locked: true }];
     case SQL.UNLOCK_SQL: return [{ unlocked: true }];
@@ -32,7 +36,7 @@ function pinned(text: string, world: World, mode: SchemaCommand): unknown[] | un
       rolsuper: false, rolcreaterole: false, rolcreatedb: false, rolreplication: false, rolbypassrls: false, rolcanlogin: true,
       can_use_public: true, can_create_public: true, owns_database: true, event_triggers: 0, owner_memberships: 0, app_role_exists: true }];
     case SQL.RELATIONS_SQL: return [
-      ...(world.tables ? [...TABLE_ORDER].flatMap(name => [{ name, kind: 'r', table_name: null }, { name: `PK_${name}`, kind: 'i', table_name: name }]) : []),
+      ...(world.tables ? currentTables.flatMap(name => [{ name, kind: 'r', table_name: null }, { name: `PK_${name}`, kind: 'i', table_name: name }]) : []),
       ...(world.migrationsTable ? [{ name: 'schema_migrations', kind: 'r', table_name: null }, { name: 'PK_schema_migrations', kind: 'i', table_name: 'schema_migrations' },
         { name: 'schema_migrations_id_seq', kind: 'S', table_name: null }] : [])];
     case SQL.FOREIGN_OBJECTS_SQL: return [{ routines: 0, types: 0, extensions: 0 }];
@@ -41,8 +45,9 @@ function pinned(text: string, world: World, mode: SchemaCommand): unknown[] | un
     case SQL.MIGRATIONS_PRIVILEGES_SQL: return [
       ...TABLE_PRIVS.map(privilege => ({ kind: 'table', privilege })), ...['SELECT', 'INSERT', 'UPDATE', 'REFERENCES'].map(privilege => ({ kind: 'column', privilege })),
       ...['USAGE', 'SELECT', 'UPDATE'].map(privilege => ({ kind: 'sequence', privilege }))].map(r => ({ ...r, effective: false, grantable: false }));
-    case SQL.APPLICATION_PRIVILEGES_SQL: return [...TABLE_ORDER].flatMap(name => TABLE_PRIVS.map(privilege => ({ name, privilege, effective: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'].includes(privilege), grantable: false })));
-    case SQL.STRUCTURE_SQL: return deriveStructure(SCHEMA_MANIFEST[0].up);
+    case SQL.APPLICATION_PRIVILEGES_SQL: return currentTables.flatMap(name => TABLE_PRIVS.map(privilege => ({ name, privilege, effective: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'].includes(privilege), grantable: false })));
+    case SQL.STRUCTURE_SQL: return deriveStructure(prefix.flatMap(e => [...e.up]));
+    case SQL.tablesEmptySql(SCHEMA_MANIFEST[1].tables): return [Object.fromEntries(SCHEMA_MANIFEST[1].tables.map(t => [t, true]))];
     case SQL.TABLES_EMPTY_SQL: return [Object.fromEntries(TABLE_ORDER.map(t => [t, true]))];
     case SQL.TRANSACTION_CLOSED_SQL: return [{ no_xid: world.tx === 'I', no_backend_xid: world.tx === 'I', implicit_transaction: world.tx === 'I' }];
     case SQL.REVOKE_MIGRATIONS_TABLE_SQL: case SQL.REVOKE_MIGRATIONS_SEQUENCE_SQL: return [];
@@ -107,19 +112,19 @@ const BOOKKEEPING = [/^SELECT \* FROM "information_schema"\."tables"/, /^CREATE 
 const virtual = () => ({ clock: () => 0, timers: { set: () => 0, clear: () => undefined }, aborted: () => false });
 
 describe('A. contrato real de TypeORM 1.1.2', () => {
-  it('apply: TypeORM emite solo transacción nuestra, contabilidad de migraciones y las 31 sentencias congeladas, en orden', async () => {
+  it('apply: TypeORM emite solo transacción nuestra, contabilidad de migraciones y las 41 sentencias congeladas de ambas migraciones, en orden', async () => {
     const h = harness('apply');
     await h.port.connect(); await h.port.begin();
-    expect(await h.port.applyMigrations()).toEqual([NAME]);
+    expect(await h.port.applyMigrations()).toEqual(NAMES);
     await h.port.commit();
     const texts = h.texts();
-    const ddl = texts.filter(t => UP_STATEMENTS.includes(t));
-    expect(ddl).toEqual([...UP_STATEMENTS]);
-    const rest = texts.filter(t => !UP_STATEMENTS.includes(t) && !/^(START TRANSACTION|COMMIT)$/.test(t));
+    const ddl = texts.filter(t => ALL_UP.includes(t));
+    expect(ddl).toEqual(ALL_UP);
+    const rest = texts.filter(t => !ALL_UP.includes(t) && !/^(START TRANSACTION|COMMIT)$/.test(t));
     for (const t of rest) expect([t, BOOKKEEPING.some(re => re.test(t))]).toEqual([t, true]);
     expect(texts[0]).toBe('START TRANSACTION'); expect(texts[texts.length - 1]).toBe('COMMIT');
     expect(h.log.find(l => l.text.startsWith('INSERT INTO'))?.values).toEqual([SCHEMA_MANIFEST[0].timestamp, NAME]);
-    expect(h.world.executed.map(e => e.name)).toEqual([NAME]);
+    expect(h.world.executed.map(e => e.name)).toEqual(NAMES);
     await h.port.close();
   });
   it('revert: elimina en orden las 8 tablas congeladas y borra el registro, sin tocar la transacción', async () => {
@@ -138,12 +143,12 @@ describe('A. contrato real de TypeORM 1.1.2', () => {
     expect(h.executors[0]).toMatchObject({ transaction: 'all', fake: false });
     await h.port.rollback(); await h.port.close();
   });
-  it('las opciones reales del DataSource llevan solo la migración congelada, tabla schema_migrations y transacción única', async () => {
+  it('las opciones reales del DataSource llevan las dos migraciones congeladas, tabla schema_migrations y transacción única', async () => {
     const h = harness('apply');
     await h.port.connect();
     const ds = h.created[0];
     expect(ds.options).toMatchObject({ migrationsTableName: 'schema_migrations', migrationsTransactionMode: 'all', synchronize: false, migrationsRun: false, installExtensions: false, entities: [] });
-    expect(ds.migrations.map(m => m.constructor.name)).toEqual([NAME]);
+    expect(ds.migrations.map(m => m.constructor.name)).toEqual(NAMES);
     await h.port.close();
   });
 });
@@ -417,7 +422,7 @@ class Extra1800000000000 implements MigrationInterface {
   async up(qr: QueryRunner) { for (const sql of SYNTHETIC_UP) await qr.query(sql); }
   async down(qr: QueryRunner) { for (const sql of SYNTHETIC_DOWN) await qr.query(sql); }
 }
-const extended: readonly ManifestEntry[] = [...SCHEMA_MANIFEST, { ...SCHEMA_MANIFEST[0], name: 'Extra1800000000000', timestamp: 1800000000000,
+const extended: readonly ManifestEntry[] = [SCHEMA_MANIFEST[0], { ...SCHEMA_MANIFEST[0], name: 'Extra1800000000000', timestamp: 1800000000000,
   migration: Extra1800000000000, up: SYNTHETIC_UP, down: SYNTHETIC_DOWN, sha256: digestOf(SYNTHETIC_UP, SYNTHETIC_DOWN), tables: ['extra'] }];
 
 describe('contrato real de TypeORM con prefijo aplicado', () => {
@@ -455,5 +460,32 @@ describe('contrato real de TypeORM con prefijo aplicado', () => {
     ds.migrations.splice(0, ds.migrations.length, { name: 'Bad1', up: async () => undefined, down: async () => undefined });
     expect(() => executor.getMigrations()).toThrow('JavaScript timestamp');
     expect(ds.isInitialized).toBe(false);
+  });
+});
+
+describe('manifiesto real de dos entradas con ejecutor real y socket simulado', () => {
+  const initial = { migrationsTable: true, tables: true, executed: [{ id: 1, timestamp: SCHEMA_MANIFEST[0].timestamp, name: NAME }] };
+  it('plan inicial es upgradable y apply ejecuta solo invitaciones', async () => {
+    const plan = harness('plan', initial);
+    expect(await runSchema({ command: 'plan', port: plan.port, ...virtual() })).toMatchObject({
+      state: 'upgradable', pending: [SCHEMA_MANIFEST[1].name], structure: 'definitions_unpinned', exit: 0,
+    });
+    const apply = harness('apply', { ...initial, executed: [...initial.executed] });
+    expect(await runSchema({ command: 'apply', port: apply.port, ...virtual() })).toMatchObject({ state: 'applied', executed: NAMES, pending: [], exit: 0 });
+    expect(apply.texts().filter(s => ALL_UP.includes(s))).toEqual(SCHEMA_MANIFEST[1].up);
+    expect(apply.texts()).toContain(SQL.TABLE_LOCK_SQL);
+    expect(transactional(apply.texts())).toEqual(['START TRANSACTION', 'COMMIT']);
+  });
+  it('revert completo bloquea diez tablas, comprueba dos vacías y elimina solo invitaciones', async () => {
+    const h = harness('revert', { migrationsTable: true, tables: true,
+      executed: SCHEMA_MANIFEST.map((e, i) => ({ id: i + 1, timestamp: e.timestamp, name: e.name })) });
+    expect(await runSchema({ command: 'revert', port: h.port, ...virtual() })).toMatchObject({ state: 'upgradable', executed: [NAME], pending: [SCHEMA_MANIFEST[1].name], exit: 0 });
+    const texts = h.texts(), lock = SQL.tableLockSql(SCHEMA_MANIFEST.flatMap(e => [...e.tables])), empty = SQL.tablesEmptySql(SCHEMA_MANIFEST[1].tables);
+    expect(texts.indexOf(lock)).toBe(texts.indexOf('START TRANSACTION') + 1);
+    expect(texts.indexOf(empty)).toBeGreaterThan(texts.indexOf(lock));
+    expect(texts.indexOf(SCHEMA_MANIFEST[1].down[0])).toBeGreaterThan(texts.indexOf(empty));
+    expect(texts.filter(s => SCHEMA_MANIFEST.some(e => e.down.includes(s)))).toEqual(SCHEMA_MANIFEST[1].down);
+    expect(h.world.executed.map(e => e.name)).toEqual([NAME]);
+    expect(transactional(texts)).toEqual(['START TRANSACTION', 'COMMIT']);
   });
 });

@@ -1,6 +1,6 @@
 type Fingerprint = { columns: number; constraints: number; indexes: number };
 
-export const businessFingerprint: Readonly<Fingerprint> = { columns: 68, constraints: 64, indexes: 26 };
+export const businessFingerprint: Readonly<Fingerprint> = { columns: 82, constraints: 80, indexes: 33 };
 export const migrationFingerprint: Readonly<Fingerprint> = { columns: 3, constraints: 1, indexes: 1 };
 
 export const fingerprintSQL = `SELECT

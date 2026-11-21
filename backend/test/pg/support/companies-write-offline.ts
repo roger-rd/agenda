@@ -43,11 +43,11 @@ export function registerCompaniesWriteOfflineTests(): void {
       }
       expect(() => companiesWriteMarkers('bad')).toThrow('runId');
     });
-    test('SQL pinned: seis tablas, sesiones primero, parámetros exactos', () => {
+    test('SQL pinned: ocho tablas de limpieza, invitaciones primero, parámetros exactos', () => {
       // companies has independent literal pinned expectations in its preserved offline tests.
       expect(companiesWriteCleanupSQL).toEqual(companiesCleanupSQL);
       expect(Object.values(companiesWriteCleanupSQL).map(sql => sql.match(/^DELETE FROM public\.(\w+) WHERE/)?.[1]))
-        .toEqual(['user_sessions', 'company_accesses', 'companies', 'organization_memberships', 'users', 'organizations']);
+        .toEqual(['invitation_companies', 'invitations', 'user_sessions', 'company_accesses', 'companies', 'organization_memberships', 'users', 'organizations']);
       const id = 'abcdef012345', targets = companiesWriteCleanupTargets(id);
       for (const sql of Object.values(companiesWriteCleanupSQL)) {
         expect(sql).toContain('$1'); expect(sql).not.toMatch(/LIKE|~|TRUNCATE/i);
@@ -107,10 +107,10 @@ export function registerCompaniesWriteOfflineTests(): void {
       expect(sameCompanyError(a, { ...b, body: { ...b.body, error: { ...b.body.error, code: 'forbidden' } } })).toBe(false);
       expect(sameCompanyError(a, { ...b, body: { ...b.body, error: { ...b.body.error, message: 'Diferente' } } })).toBe(false);
     });
-    test('integración exclusiva, Clock después de preflight y ocho tablas', () => {
+    test('integración exclusiva, Clock después de preflight y diez tablas', () => {
       const source = readFileSync(join(__dirname, 'connected.ts'), 'utf8');
       const tables = source.match(/const tables = \[([^\]]+)\] as const/)![1].match(/'[^']+'/g)!.map(s => s.slice(1, -1));
-      expect(tables).toEqual(['organizations', 'users', 'organization_memberships', 'companies', 'company_accesses', 'posts', 'post_comments', 'user_sessions']);
+      expect(tables).toEqual(['organizations', 'users', 'organization_memberships', 'companies', 'company_accesses', 'user_sessions', 'posts', 'post_comments', 'invitations', 'invitation_companies']);
       expect(source).toContain("if (phase === 'companies-write') registerCompaniesWriteTest(");
       expect(source).toContain("if (phase === 'companies-write') {\n          moduleRef = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(Clock).useValue(clock).compile();");
       expect(source.indexOf('clock = new ControlledClock()')).toBeGreaterThan(source.indexOf("await empty(); gate.mark('baseline');"));
@@ -118,7 +118,7 @@ export function registerCompaniesWriteOfflineTests(): void {
       expect(source).toContain("} else if (phase === 'companies-write') {\n      afterAll(async () => { try { if (gate.isArmed && observer?.isInitialized) await cleanup(); } finally { await close(); } });");
       const cleanup = source.slice(source.indexOf('async function cleanupCompaniesWrite('), source.indexOf('async function register('));
       expect(cleanup).toContain('await empty();');
-      const order = ['sessions', 'accesses', 'companies', 'memberships', 'users', 'organizations'].map(key => cleanup.indexOf(`companiesWriteCleanupSQL.${key},`));
+      const order = ['invitationCompanies', 'invitations', 'sessions', 'accesses', 'companies', 'memberships', 'users', 'organizations'].map(key => cleanup.indexOf(`companiesWriteCleanupSQL.${key},`));
       expect(order.every((p, i) => p >= 0 && (i === 0 || p > order[i - 1]))).toBe(true);
       const readonly = new DeleteGate('readonly');
       for (const check of ['identity', 'schema', 'baseline'] as const) readonly.mark(check);

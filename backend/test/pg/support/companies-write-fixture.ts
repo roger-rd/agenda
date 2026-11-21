@@ -12,6 +12,8 @@ export function companiesWriteCleanupTargets(id: string) {
   return { emails: reserved.map(m => m.email), organizationNames: reserved.slice(0, 2).map(m => m.organizationName) };
 }
 export const companiesWriteCleanupSQL = {
+  invitationCompanies: 'DELETE FROM public.invitation_companies WHERE organization_id IN (SELECT id FROM public.organizations WHERE name = ANY($1::text[]))',
+  invitations: 'DELETE FROM public.invitations WHERE organization_id IN (SELECT id FROM public.organizations WHERE name = ANY($1::text[]))',
   sessions: 'DELETE FROM public.user_sessions WHERE user_id IN (SELECT id FROM public.users WHERE email = ANY($1::text[]))',
   accesses: 'DELETE FROM public.company_accesses WHERE membership_id IN (SELECT id FROM public.organization_memberships WHERE user_id IN (SELECT id FROM public.users WHERE email = ANY($1::text[])) OR organization_id IN (SELECT id FROM public.organizations WHERE name = ANY($2::text[])))',
   companies: 'DELETE FROM public.companies WHERE organization_id IN (SELECT id FROM public.organizations WHERE name = ANY($1::text[]))',

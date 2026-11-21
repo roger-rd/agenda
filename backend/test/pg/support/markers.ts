@@ -48,6 +48,9 @@ export function httpCleanupTargets(id: string): { emails: string[]; organization
 }
 
 export const httpCleanupSQL = {
+  invitationCompanies: 'DELETE FROM public.invitation_companies WHERE organization_id IN (SELECT id FROM public.organizations WHERE name = ANY($1::text[]))',
+  invitations: 'DELETE FROM public.invitations WHERE organization_id IN (SELECT id FROM public.organizations WHERE name = ANY($1::text[]))',
+  sessions: 'DELETE FROM public.user_sessions WHERE user_id IN (SELECT id FROM public.users WHERE email = ANY($1::text[]))',
   memberships: 'DELETE FROM public.organization_memberships WHERE user_id IN (SELECT id FROM public.users WHERE email = ANY($1::text[])) OR organization_id IN (SELECT id FROM public.organizations WHERE name = ANY($2::text[]))',
   users: 'DELETE FROM public.users WHERE email = ANY($1::text[])',
   organizations: 'DELETE FROM public.organizations WHERE name = ANY($1::text[])',
@@ -60,7 +63,4 @@ export function authCleanupTargets(id: string) {
   const { a, b } = authMarkers(id);
   return { emails: [a.email, b.email], organizationNames: [a.organizationName, b.organizationName] };
 }
-export const authCleanupSQL = {
-  sessions: 'DELETE FROM public.user_sessions WHERE user_id IN (SELECT id FROM public.users WHERE email = ANY($1::text[]))',
-  ...httpCleanupSQL,
-} as const;
+export const authCleanupSQL = { ...httpCleanupSQL } as const;

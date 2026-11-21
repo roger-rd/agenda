@@ -1,13 +1,18 @@
+import { companiesCleanupSQL } from './support/companies-fixture';
+import { companiesWriteCleanupSQL } from './support/companies-write-fixture';
+import { SCHEMA_MANIFEST } from '../../src/database/migrations/schema-manifest';
+import { derivePrefix, footprintOf } from '../../src/database/schema-runner/schema-structure';
+import { tablesOfPrefix } from '../../src/database/schema-runner/schema-guards';
 import { registerCompaniesWriteOfflineTests } from './support/companies-write-offline';
 import { registerCompaniesOfflineTests } from './support/companies-offline';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { registerConnectedSuite, loadedDatabaseModules } from './support/load-connected.cjs';
 import { assertFingerprint, businessFingerprint, migrationFingerprint, fingerprintSQL } from './support/schema-fingerprint';
-import { classifyMigrationHistory } from './support/migration-history';
+import { expectedMigrations, migrationHistorySQL, classifyMigrationHistory } from './support/migration-history';
 import { parsePhase, phaseEnvironment } from './support/phase';
 import { assertReadonlyQuery, guardedQuery } from './support/readonly';
-import { DeleteGate, httpCleanupSQL, httpCleanupTargets, httpMarkers, markers, runId, validateRunId } from './support/markers';
+import { authCleanupSQL, DeleteGate, httpCleanupSQL, httpCleanupTargets, httpMarkers, markers, runId, validateRunId } from './support/markers';
 import { normalizerRejected, checkRejected, columnTypeRejected, collisions, distinct } from './support/unicode-cases';
 import { normalizePersonName, organizationNameKey } from '../../src/identity/person-name';
 
@@ -30,7 +35,7 @@ if (phase === 'offline') {
       expect(source).toContain('expect(new Set(source.entityMetadatas.map(m => m.target))).toEqual(new Set([User, Organization, OrganizationMembership, UserSession, Company, CompanyAccess]));');
     });
     test('huellas: referencias exactas de negocio y schema_migrations', () => {
-      expect(businessFingerprint).toEqual({ columns: 68, constraints: 64, indexes: 26 });
+      expect(businessFingerprint).toEqual({ columns: 82, constraints: 80, indexes: 33 });
       expect(migrationFingerprint).toEqual({ columns: 3, constraints: 1, indexes: 1 });
     });
     test('huella: cuenta columnas desde pg_catalog sin filtrar por privilegios', () => {
@@ -55,20 +60,40 @@ if (phase === 'offline') {
       expect(() => assertReadonlyQuery(fingerprintSQL)).not.toThrow();
       expect(() => assertReadonlyQuery({ text: fingerprintSQL, values: [[label === 'negocio' ? 'organizations' : 'schema_migrations']] })).not.toThrow();
     });
-    test('historial: exactamente una fila verifica; cero o varias fallan', () => {
-      expect(classifyMigrationHistory({ rows: [{ name: 'InitialSchema1794009600000' }] })).toBe('verified');
-      for (const rows of [[], [{}, {}]]) expect(() => classifyMigrationHistory({ rows })).toThrow('exactamente 1 fila');
+    test('diez tablas y huella coinciden con el prefijo completo del manifiesto', () => {
+      expect(businessFingerprint).toEqual(footprintOf(derivePrefix(SCHEMA_MANIFEST, 2)));
+      const source = readFileSync(join(__dirname, 'support/connected.ts'), 'utf8');
+      const tables = source.match(/const tables = \[([^\]]+)\] as const/)![1].match(/'[^']+'/g)!.map(s => s.slice(1, -1));
+      expect(tables).toEqual(tablesOfPrefix(SCHEMA_MANIFEST, 2));
+      expect(tables).toHaveLength(10);
+      expect(migrationHistorySQL).toBe('SELECT id, name, timestamp FROM public.schema_migrations ORDER BY id');
+      expect(() => assertReadonlyQuery(migrationHistorySQL)).not.toThrow();
+      expect(source).toContain('observer.query(migrationHistorySQL)');
+      expect(source).toContain('classifyMigrationHistory(historyResult, expectedMigrations)');
+    });
+    test('historial: secuencia completa con timestamps numéricos o bigint decimal', () => {
+      expect(classifyMigrationHistory({ rows: expectedMigrations }, expectedMigrations)).toBe('verified');
+      expect(classifyMigrationHistory({ rows: expectedMigrations.map(r => ({ ...r, timestamp: String(r.timestamp) })) }, expectedMigrations)).toBe('verified');
+    });
+    test.each([
+      ['falta', expectedMigrations.slice(0, 1)], ['sobra', [...expectedMigrations, expectedMigrations[0]]],
+      ['orden', [...expectedMigrations].reverse()], ['desconocido', [{ ...expectedMigrations[0], name: 'secreto' }, expectedMigrations[1]]],
+      ['timestamp', [{ ...expectedMigrations[0], timestamp: 1 }, expectedMigrations[1]]],
+      ['duplicado', [expectedMigrations[0], expectedMigrations[0]]], ['hueco', [expectedMigrations[1]]],
+      ['vacío', []], ['ilegible', [null, null]], ['timestamp inseguro', [{ ...expectedMigrations[0], timestamp: Number.MAX_SAFE_INTEGER + 1 }, expectedMigrations[1]]],
+    ])('historial rechaza %s sin exponer filas', (_label, rows) => {
+      expect(() => classifyMigrationHistory({ rows }, expectedMigrations)).toThrow('El historial de migraciones no coincide con el manifiesto');
     });
     test('historial: 42501 de pg directo o del observer queda sin verificar', () => {
       const driverError = Object.assign(new Error('permission denied'), { code: '42501', severity: 'ERROR', routine: 'aclcheck_error' });
       const wrapped = Object.assign(new Error('query failed'), { name: 'QueryFailedError', driverError });
-      for (const error of [driverError, wrapped]) expect(classifyMigrationHistory({ error })).toBe('unverified');
+      for (const error of [driverError, wrapped]) expect(classifyMigrationHistory({ error }, expectedMigrations)).toBe('unverified');
     });
     test('historial: propaga otros errores y no basta con code=42501', () => {
       const driverError = Object.assign(new Error('missing table'), { code: '42P01', severity: 'ERROR', routine: 'parserOpenTable' });
       const wrapped = Object.assign(new Error('query failed'), { name: 'QueryFailedError', driverError });
-      for (const error of [driverError, wrapped, Object.assign(new Error('unrelated'), { code: '42501' }), { code: '42501' }]) {
-        try { classifyMigrationHistory({ error }); throw new Error('debió propagar'); }
+      for (const error of [driverError, wrapped, Object.assign(new Error('unrelated'), { code: '42501' }), { code: '42501' }, Object.assign(new Error('x'), { code: '42501', severity: 'ERROR' }), Object.assign(new Error('x'), { code: '42501', routine: 'aclcheck_error' })]) {
+        try { classifyMigrationHistory({ error }, expectedMigrations); throw new Error('debió propagar'); }
         catch (caught) { expect(caught).toBe(error); }
       }
     });
@@ -167,6 +192,48 @@ if (phase === 'offline') {
       expect(fallback).toContain("observer!.query('DELETE FROM public.organization_memberships WHERE user_id IN (SELECT id FROM public.users WHERE email ~ $1) OR organization_id IN (SELECT id FROM public.organizations WHERE name LIKE $2)', [emailPattern, orgPattern])");
       expect(fallback).toContain("observer!.query('DELETE FROM public.users WHERE email ~ $1', [emailPattern])");
       expect(fallback).toContain("observer!.query('DELETE FROM public.organizations WHERE name LIKE $1', [orgPattern])");
+    });
+    test.each(['dml', 'http', 'auth', 'companies', 'companies-write'] as const)('limpieza %s: invitaciones primero por IDs y respaldo; sesiones antes de membresías', phase => {
+      const source = readFileSync(join(__dirname, 'support/connected.ts'), 'utf8');
+      const start = phase === 'companies' ? 'async function cleanupCompanies(' : phase === 'companies-write' ? 'async function cleanupCompaniesWrite(' : 'async function cleanup()';
+      const end = phase === 'companies' ? 'async function cleanupCompaniesWrite(' : phase === 'companies-write' ? 'async function register(' : 'async function cleanupCompanies(';
+      const body = source.slice(source.indexOf(start), source.indexOf(end));
+      const ids = [...body.matchAll(/observer!\.query\('([^']+)'/g)].map(m => m[1]);
+      expect(ids.slice(0, 2)).toEqual([
+        'DELETE FROM public.invitation_companies WHERE organization_id = ANY($1::uuid[])',
+        'DELETE FROM public.invitations WHERE organization_id = ANY($1::uuid[])',
+      ]);
+      expect(body).toContain("observer!.query('DELETE FROM public.invitation_companies WHERE organization_id = ANY($1::uuid[])', [orgIds])");
+      expect(body).toContain("observer!.query('DELETE FROM public.invitations WHERE organization_id = ANY($1::uuid[])', [orgIds])");
+      const session = ids.findIndex(sql => sql.startsWith('DELETE FROM public.user_sessions '));
+      const membership = ids.findIndex(sql => sql.startsWith('DELETE FROM public.organization_memberships '));
+      expect(session).toBeGreaterThan(1); expect(session).toBeLessThan(membership);
+      if (phase === 'dml') {
+        const fallback = body.slice(body.indexOf('const emailPattern'));
+        const sql = [...fallback.matchAll(/observer!\.query\('([^']+)'/g)].map(m => m[1]);
+        expect(sql.slice(0, 3)).toEqual([
+          'DELETE FROM public.invitation_companies WHERE organization_id IN (SELECT id FROM public.organizations WHERE name LIKE $1)',
+          'DELETE FROM public.invitations WHERE organization_id IN (SELECT id FROM public.organizations WHERE name LIKE $1)',
+          'DELETE FROM public.user_sessions WHERE user_id IN (SELECT id FROM public.users WHERE email ~ $1)',
+        ]);
+        expect(sql[3]).toMatch(/^DELETE FROM public.organization_memberships /);
+        expect(fallback).toContain("WHERE name LIKE $1)', [orgPattern])");
+      } else {
+        const [name, sql] = phase === 'http' ? ['httpCleanupSQL', httpCleanupSQL] as const : phase === 'auth' ? ['authCleanupSQL', authCleanupSQL] as const :
+          phase === 'companies' ? ['companiesCleanupSQL', companiesCleanupSQL] as const : ['companiesWriteCleanupSQL', companiesWriteCleanupSQL] as const;
+        expect(Object.values(sql).slice(0, 3)).toEqual([
+          'DELETE FROM public.invitation_companies WHERE organization_id IN (SELECT id FROM public.organizations WHERE name = ANY($1::text[]))',
+          'DELETE FROM public.invitations WHERE organization_id IN (SELECT id FROM public.organizations WHERE name = ANY($1::text[]))',
+          'DELETE FROM public.user_sessions WHERE user_id IN (SELECT id FROM public.users WHERE email = ANY($1::text[]))',
+        ]);
+        const calls = [...body.matchAll(new RegExp('observer!\\.query\\(' + name + '\\.(\\w+),', 'g'))].map(m => m[1]);
+        expect(calls).toEqual(Object.keys(sql));
+        expect(calls.slice(0, 3)).toEqual(['invitationCompanies', 'invitations', 'sessions']);
+        expect(calls.indexOf('sessions')).toBeLessThan(calls.indexOf('memberships'));
+        const parameters = phase === 'http' ? 'httpTargets.organizationNames' : phase === 'auth' ? 'authTargets.organizationNames' : 'organizationNames';
+        for (const key of ['invitationCompanies', 'invitations']) expect(body).toContain(`observer!.query(${name}.${key}, [${parameters}])`);
+        for (const statement of Object.values(sql)) expect(() => assertReadonlyQuery(statement)).toThrow('readonly');
+      }
     });
     test('DeleteGate falla cerrado', () => {
       for (const p of ['offline', 'readonly', 'dml', 'http'] as const) {

@@ -33,9 +33,10 @@ import { authCleanupSQL, authCleanupTargets, DeleteGate, httpCleanupSQL, httpCle
 import { accepted, checkRejected, columnTypeRejected, collisions, distinct, normalizerRejected } from './unicode-cases';
 import type { Phase } from './phase';
 import { assertFingerprint, businessFingerprint, migrationFingerprint, fingerprintSQL } from './schema-fingerprint';
-import { classifyMigrationHistory, type MigrationHistory } from './migration-history';
+import { expectedMigrations, migrationHistorySQL, classifyMigrationHistory, type MigrationHistory } from './migration-history';
 
-const tables = ['organizations', 'users', 'organization_memberships', 'companies', 'company_accesses', 'posts', 'post_comments', 'user_sessions'] as const;
+// Arnes estricto: no ejecutar fases connected antes de aplicar ambas migraciones en agenda_test.
+const tables = ['organizations', 'users', 'organization_memberships', 'companies', 'company_accesses', 'user_sessions', 'posts', 'post_comments', 'invitations', 'invitation_companies'] as const;
 const identitySQL = "select current_user as usuario, current_database() as base, r.rolsuper, r.rolcreaterole, r.rolcreatedb, r.rolreplication, r.rolbypassrls, has_schema_privilege(current_user, 'public', 'CREATE') as crea_en_public, has_database_privilege(current_user, current_database(), 'CREATE') as crea_en_base from pg_roles r where r.rolname = current_user";
 const sessionSQL = "SELECT pid, backend_start FROM pg_stat_activity WHERE datname = current_database() AND usename = current_user AND application_name = 'agenda-backend'";
 const roSQL = "SELECT pg_sleep(0.2), pg_backend_pid() AS pid, current_setting('transaction_read_only') AS ro, current_setting('default_transaction_read_only') AS dro";
@@ -77,8 +78,10 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
       const userIds = saved.map(r => r.user.id), orgIds = saved.map(r => r.organization.id);
       if (companiesWriteTargets) { await cleanupCompaniesWrite(userIds, orgIds); return; }
       if (companiesTargets) { await cleanupCompanies(userIds, orgIds); return; }
+      await observer!.query('DELETE FROM public.invitation_companies WHERE organization_id = ANY($1::uuid[])', [orgIds]);
+      await observer!.query('DELETE FROM public.invitations WHERE organization_id = ANY($1::uuid[])', [orgIds]);
+      await observer!.query('DELETE FROM public.user_sessions WHERE user_id = ANY($1::uuid[])', [userIds]);
       if (authTargets) {
-        await observer!.query('DELETE FROM public.user_sessions WHERE user_id = ANY($1::uuid[])', [userIds]);
         await observer!.query('DELETE FROM public.organization_memberships WHERE id = ANY($1::uuid[])', [saved.map(r => r.membership.id)]);
       }
       // First saved ids, then exact HTTP reservations or DML run patterns. Always WHERE.
@@ -89,16 +92,24 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
       await observer!.query('DELETE FROM public.users WHERE id = ANY($1::uuid[])', [userIds]);
       await observer!.query('DELETE FROM public.organizations WHERE id = ANY($1::uuid[])', [orgIds]);
       if (httpTargets) {
+        await observer!.query(httpCleanupSQL.invitationCompanies, [httpTargets.organizationNames]);
+        await observer!.query(httpCleanupSQL.invitations, [httpTargets.organizationNames]);
+        await observer!.query(httpCleanupSQL.sessions, [httpTargets.emails]);
         await observer!.query(httpCleanupSQL.memberships, [httpTargets.emails, httpTargets.organizationNames]);
         await observer!.query(httpCleanupSQL.users, [httpTargets.emails]);
         await observer!.query(httpCleanupSQL.organizations, [httpTargets.organizationNames]);
       } else if (authTargets) {
+        await observer!.query(authCleanupSQL.invitationCompanies, [authTargets.organizationNames]);
+        await observer!.query(authCleanupSQL.invitations, [authTargets.organizationNames]);
         await observer!.query(authCleanupSQL.sessions, [authTargets.emails]);
         await observer!.query(authCleanupSQL.memberships, [authTargets.emails, authTargets.organizationNames]);
         await observer!.query(authCleanupSQL.users, [authTargets.emails]);
         await observer!.query(authCleanupSQL.organizations, [authTargets.organizationNames]);
       } else {
         const emailPattern = `^b2b-${id}-[0-9]+@agenda-b2b[.]test$`, orgPattern = `B2B-${id}-%`;
+        await observer!.query('DELETE FROM public.invitation_companies WHERE organization_id IN (SELECT id FROM public.organizations WHERE name LIKE $1)', [orgPattern]);
+        await observer!.query('DELETE FROM public.invitations WHERE organization_id IN (SELECT id FROM public.organizations WHERE name LIKE $1)', [orgPattern]);
+        await observer!.query('DELETE FROM public.user_sessions WHERE user_id IN (SELECT id FROM public.users WHERE email ~ $1)', [emailPattern]);
         await observer!.query('DELETE FROM public.organization_memberships WHERE user_id IN (SELECT id FROM public.users WHERE email ~ $1) OR organization_id IN (SELECT id FROM public.organizations WHERE name LIKE $2)', [emailPattern, orgPattern]);
         await observer!.query('DELETE FROM public.users WHERE email ~ $1', [emailPattern]);
         await observer!.query('DELETE FROM public.organizations WHERE name LIKE $1', [orgPattern]);
@@ -109,6 +120,8 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
       gate.assertArmed();
       if (!companiesTargets) throw new Error('companies requiere reservas');
       const users = [...userIds, ...companiesSaved.users], memberships = [...saved.map(r => r.membership.id), ...companiesSaved.memberships];
+      await observer!.query('DELETE FROM public.invitation_companies WHERE organization_id = ANY($1::uuid[])', [orgIds]);
+      await observer!.query('DELETE FROM public.invitations WHERE organization_id = ANY($1::uuid[])', [orgIds]);
       await observer!.query('DELETE FROM public.user_sessions WHERE user_id = ANY($1::uuid[])', [users]);
       await observer!.query('DELETE FROM public.company_accesses WHERE membership_id = ANY($1::uuid[]) OR company_id = ANY($2::uuid[])', [memberships, companiesSaved.companies]);
       await observer!.query('DELETE FROM public.companies WHERE id = ANY($1::uuid[])', [companiesSaved.companies]);
@@ -116,6 +129,8 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
       await observer!.query('DELETE FROM public.users WHERE id = ANY($1::uuid[])', [users]);
       await observer!.query('DELETE FROM public.organizations WHERE id = ANY($1::uuid[])', [orgIds]);
       const { emails, organizationNames } = companiesTargets;
+      await observer!.query(companiesCleanupSQL.invitationCompanies, [organizationNames]);
+      await observer!.query(companiesCleanupSQL.invitations, [organizationNames]);
       await observer!.query(companiesCleanupSQL.sessions, [emails]);
       await observer!.query(companiesCleanupSQL.accesses, [emails, organizationNames]);
       await observer!.query(companiesCleanupSQL.companies, [organizationNames]);
@@ -129,6 +144,8 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
       if (!companiesWriteTargets) throw new Error('companies-write requiere reservas');
       const users = [...userIds, ...companiesSaved.users], memberships = [...saved.map(r => r.membership.id), ...companiesSaved.memberships];
       try {
+        await observer!.query('DELETE FROM public.invitation_companies WHERE organization_id = ANY($1::uuid[])', [orgIds]);
+        await observer!.query('DELETE FROM public.invitations WHERE organization_id = ANY($1::uuid[])', [orgIds]);
         await observer!.query('DELETE FROM public.user_sessions WHERE user_id = ANY($1::uuid[])', [users]);
         await observer!.query('DELETE FROM public.company_accesses WHERE membership_id = ANY($1::uuid[]) OR company_id = ANY($2::uuid[])', [memberships, companiesSaved.companies]);
         await observer!.query('DELETE FROM public.companies WHERE id = ANY($1::uuid[])', [companiesSaved.companies]);
@@ -138,6 +155,8 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
       } finally {
         // Exact reservations also cover committed requests whose response was lost.
         const { emails, organizationNames } = companiesWriteTargets;
+        await observer!.query(companiesWriteCleanupSQL.invitationCompanies, [organizationNames]);
+        await observer!.query(companiesWriteCleanupSQL.invitations, [organizationNames]);
         await observer!.query(companiesWriteCleanupSQL.sessions, [emails]);
         await observer!.query(companiesWriteCleanupSQL.accesses, [emails, organizationNames]);
         await observer!.query(companiesWriteCleanupSQL.companies, [organizationNames]);
@@ -205,7 +224,7 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
         }
         // Structural checks are independent of SELECT on schema_migrations.
         const fingerprint = await observer.query(fingerprintSQL, [tables]);
-        console.info('[b2b] huella negocio (referencia 68/64/26)', fingerprint);
+        console.info('[b2b] huella negocio (referencia 82/80/33)', fingerprint);
         assertFingerprint('negocio', fingerprint[0], businessFingerprint);
         const migrations = await observer.query(fingerprintSQL, [['schema_migrations']]);
         console.info('[b2b] huella schema_migrations (referencia 3/1/1)', migrations);
@@ -218,9 +237,9 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
         // Only a pg permission error from this history query may be tolerated.
         let historyResult: { rows: unknown[] } | { error: unknown };
         try {
-          historyResult = { rows: await observer.query('SELECT name FROM public.schema_migrations WHERE name = $1', ['InitialSchema1794009600000']) };
+          historyResult = { rows: await observer.query(migrationHistorySQL) };
         } catch (error) { historyResult = { error }; }
-        migrationHistory = classifyMigrationHistory(historyResult);
+        migrationHistory = classifyMigrationHistory(historyResult, expectedMigrations);
         if (migrationHistory === 'unverified') console.warn('[b2b] historial de migraciones SIN VERIFICAR (sin SELECT sobre schema_migrations)');
         await empty(); gate.mark('baseline');
         beforePids = new Set((await observer.query(sessionSQL) as Session[]).map(s => s.pid));

@@ -4,7 +4,7 @@
  * y organization_memberships (wA/cA). UPDATE de la aplicación en companies (PATCH) y
  * user_sessions (renovación por SessionAuthGuard en GET /companies, PATCH de wA
  * rechazado por rol y cadena de días). Login sin cookie previa: ninguna revocación.
- * SELECT de verificación; DELETE de limpieza en user_sessions, company_accesses,
+ * SELECT de verificación; DELETE de limpieza en invitation_companies, invitations, user_sessions, company_accesses,
  * companies, organization_memberships, users y organizations. Sin DDL.
  */
 import request from 'supertest';

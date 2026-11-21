@@ -2,16 +2,19 @@ import { deriveStructure } from './schema-structure';
 import { TABLE_ORDER } from '../migrations/initial-schema.statements';
 import { SCHEMA_MANIFEST } from '../migrations/schema-manifest';
 import { refusal, runSchema, SessionContractError, summaryOf, type RunResult, type SchemaPort, type Timers } from './schema-runner';
-import { ALL_STATEMENTS } from './schema-sql';
+import { tableLockSql, tablesEmptySql, ALL_STATEMENTS } from './schema-sql';
 import { BUDGET, LOCK_KEY, SUMMARY_PREFIX, TARGET, type SchemaCommand } from './schema-target';
 
 const SECRET = 'fake-owner-password-for-unit-tests-0003';
-const NAME = SCHEMA_MANIFEST[0].name;
+const NAMES = SCHEMA_MANIFEST.map(e => e.name);
+const ALL_TABLES = SCHEMA_MANIFEST.flatMap(e => [...e.tables]);
 const LABEL = new Map(Object.entries(ALL_STATEMENTS).map(([name, sql]) => [sql, name]));
+LABEL.set(tableLockSql(ALL_TABLES), 'TABLE_LOCK_SQL');
+LABEL.set(tablesEmptySql(SCHEMA_MANIFEST[1].tables), 'TABLES_EMPTY_SQL');
 const TABLE_PRIVS = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'];
 
 type Row = Record<string, unknown>;
-type Schema = 'fresh' | 'fresh-with-table' | 'applied' | 'partial' | 'foreign';
+type Schema = 'fresh' | 'fresh-with-table' | 'upgradable' | 'applied' | 'partial' | 'foreign';
 interface Plan { label: string; nth?: number; mode: 'throw' | 'hang' }
 
 /** In-memory stand-in for a session: it answers the pinned statements and models transactional visibility. */
@@ -33,12 +36,12 @@ function fakePort(command: SchemaCommand, start: Schema, tweaks: { exposed?: boo
   const ro = command === 'plan' ? 'on' : 'off';
   const relations = (): Row[] => {
     const s = w.schema;
-    const tables = (s === 'applied' || s === 'partial') ? (s === 'partial' ? [...TABLE_ORDER].slice(0, 3) : [...TABLE_ORDER]) : [];
+    const tables = (s === 'applied' || s === 'upgradable' || s === 'partial') ? (s === 'partial' ? [...TABLE_ORDER].slice(0, 3) : s === 'upgradable' ? [...TABLE_ORDER] : ALL_TABLES) : [];
     const migrations = s !== 'fresh';
     return [
       ...tables.map(name => ({ name, kind: 'r', table_name: null })), ...tables.map(name => ({ name: `PK_${name}`, kind: 'i', table_name: name })),
       ...(migrations && s !== 'foreign' ? [{ name: 'schema_migrations', kind: 'r', table_name: null }, { name: 'PK_schema_migrations', kind: 'i', table_name: 'schema_migrations' }] : []),
-      ...((s === 'applied' || s === 'fresh-with-table') ? [{ name: 'schema_migrations_id_seq', kind: 'S', table_name: null }] : []),
+      ...((s === 'applied' || s === 'upgradable' || s === 'fresh-with-table') ? [{ name: 'schema_migrations_id_seq', kind: 'S', table_name: null }] : []),
       ...(s === 'foreign' ? [{ name: 'secret_notes', kind: 'r', table_name: null }] : []),
     ];
   };
@@ -52,15 +55,15 @@ function fakePort(command: SchemaCommand, start: Schema, tweaks: { exposed?: boo
       can_use_public: true, can_create_public: true, owns_database: true, event_triggers: 0, owner_memberships: 0, app_role_exists: true }],
     RELATIONS_SQL: relations, FOREIGN_OBJECTS_SQL: () => [{ routines: 0, types: 0, extensions: 0 }],
     MIGRATIONS_COLUMNS_SQL: () => [{ name: 'id', type: 'integer' }, { name: 'timestamp', type: 'bigint' }, { name: 'name', type: 'character varying' }],
-    EXECUTED_SQL: () => (w.schema === 'applied' ? (tweaks.names ?? [NAME]).map(name => ({ name, timestamp: SCHEMA_MANIFEST[0].timestamp })) : []),
+    EXECUTED_SQL: () => (['applied', 'upgradable'].includes(w.schema) ? (tweaks.names ?? NAMES.slice(0, w.schema === 'upgradable' ? 1 : 2)).map(name => ({ name, timestamp: SCHEMA_MANIFEST.find(e => e.name === name)?.timestamp ?? 0 })) : []),
     MIGRATIONS_PRIVILEGES_SQL: () => [
       ...TABLE_PRIVS.map(privilege => ({ kind: 'table', privilege })), ...['SELECT', 'INSERT', 'UPDATE', 'REFERENCES'].map(privilege => ({ kind: 'column', privilege })),
       ...['USAGE', 'SELECT', 'UPDATE'].map(privilege => ({ kind: 'sequence', privilege })),
     ].map(r => ({ ...r, effective: tweaks.exposed === true && r.kind === 'table' && r.privilege === 'SELECT', grantable: false })),
-    APPLICATION_PRIVILEGES_SQL: () => [...TABLE_ORDER].flatMap(name => TABLE_PRIVS.map(privilege => ({
+    APPLICATION_PRIVILEGES_SQL: () => ALL_TABLES.flatMap(name => TABLE_PRIVS.map(privilege => ({
       name, privilege, effective: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'].includes(privilege) !== (tweaks.appWrong === true && privilege === 'TRUNCATE'), grantable: false }))),
-    STRUCTURE_SQL: () => deriveStructure(SCHEMA_MANIFEST[0].up) as unknown as Row[],
-    TABLES_EMPTY_SQL: () => [Object.fromEntries(TABLE_ORDER.map(t => [t, tweaks.nonEmpty !== true]))],
+    STRUCTURE_SQL: () => deriveStructure(SCHEMA_MANIFEST.slice(0, w.schema === 'upgradable' ? 1 : 2).flatMap(e => [...e.up])) as unknown as Row[],
+    TABLES_EMPTY_SQL: () => [Object.fromEntries(SCHEMA_MANIFEST[1].tables.map(t => [t, tweaks.nonEmpty !== true]))],
     TRANSACTION_CLOSED_SQL: () => [{ no_xid: !w.tx, no_backend_xid: !w.tx, implicit_transaction: !w.tx }],
   };
   const port: SchemaPort = {
@@ -71,7 +74,7 @@ function fakePort(command: SchemaCommand, start: Schema, tweaks: { exposed?: boo
       events.push(`q:${label}`);
       if (label === 'LOCK_SQL' || label === 'UNLOCK_SQL') expect(params).toEqual([LOCK_KEY]);
       if (['IDENTITY_SQL', 'MIGRATIONS_PRIVILEGES_SQL'].includes(label)) expect(params).toEqual([TARGET.app]);
-      if (label === 'APPLICATION_PRIVILEGES_SQL') expect(params).toEqual([TARGET.app, [...TABLE_ORDER]]);
+      if (label === 'APPLICATION_PRIVILEGES_SQL') expect(params).toEqual([TARGET.app, ALL_TABLES]);
       await trip(label);
       return answers[label]().map(r => ({ ...r }));
     },
@@ -83,8 +86,8 @@ function fakePort(command: SchemaCommand, start: Schema, tweaks: { exposed?: boo
     async begin(isolation) { events.push(isolation ? `begin:${isolation}` : 'begin'); await trip('begin'); w.tx = true; w.committed = w.schema; },
     async commit() { events.push('commit'); w.commits++; await trip('commit'); w.tx = false; w.committed = w.schema; },
     async rollback() { events.push('rollback'); w.rolledBack++; await trip('rollback'); w.tx = false; w.schema = w.committed; },
-    async applyMigrations() { events.push('migrate'); await trip('migrate'); w.schema = 'applied'; return [NAME]; },
-    async revertLast() { events.push('revert'); await trip('revert'); w.schema = 'fresh-with-table'; },
+    async applyMigrations() { events.push('migrate'); await trip('migrate'); w.schema = 'applied'; return NAMES; },
+    async revertLast() { events.push('revert'); await trip('revert'); w.schema = 'upgradable'; },
     transactionEvidence() { return { clientStatus: 'clientStatus' in tweaks ? tweaks.clientStatus : (w.tx ? 'T' : 'I'), queryRunnerActive: w.tx }; },
     async close() { events.push('close'); await trip('close'); w.closed = true; },
     isClosed() { return w.closed; },
@@ -132,7 +135,7 @@ describe('secuencia exacta', () => {
     const r = await run('apply', 'fresh');
     expect(r.events).toEqual(APPLY_SEQUENCE);
     expect(r.result).toMatchObject({ outcome: 'applied', ok: true, code: null, committed: true, transaction: 'committed', lock: 'released', closure: 'verified', resources: 'closed', exit: 0, state: 'applied' });
-    expect(r.result.executed).toEqual([NAME]);
+    expect(r.result.executed).toEqual(NAMES);
     expect(r.t.pending()).toBe(0);
   });
   it('el bloqueo se adquiere antes de leer el estado y se libera después de COMMIT', async () => {
@@ -152,7 +155,7 @@ describe('secuencia exacta', () => {
   it('plan: transacción de lectura repetible, sin migración, REVOKE, COMMIT ni DDL; termina con ROLLBACK', async () => {
     const r = await run('plan', 'fresh');
     expect(r.events).toEqual(['connect', 'q:LOCK_SQL', 'begin:REPEATABLE READ', 'q:IDENTITY_SQL', 'q:RELATIONS_SQL', 'q:FOREIGN_OBJECTS_SQL', 'rollback', 'q:TRANSACTION_CLOSED_SQL', 'q:UNLOCK_SQL', 'close']);
-    expect(r.result).toMatchObject({ outcome: 'planned', ok: true, state: 'fresh', exit: 0, pending: [NAME], executed: [] });
+    expect(r.result).toMatchObject({ outcome: 'planned', ok: true, state: 'fresh', exit: 0, pending: NAMES, executed: [] });
     expect(r.events.filter(e => /^(migrate|revert|commit|exec:)/.test(e))).toEqual([]);
   });
   it('plan sobre un esquema aplicado verifica privilegios y no ejecuta nada', async () => {
@@ -189,9 +192,9 @@ describe('estado aplicado (idempotencia) y revert', () => {
   it('A. revert con tablas vacías: BEGIN, LOCK, revalidación, comprobación de vacío, reversión, verificación, COMMIT', async () => {
     const r = await run('revert', 'applied');
     expect(r.events).toEqual(['connect', 'q:LOCK_SQL', 'q:IDENTITY_SQL', 'q:RELATIONS_SQL', 'q:FOREIGN_OBJECTS_SQL', 'q:MIGRATIONS_COLUMNS_SQL', 'q:EXECUTED_SQL', 'q:STRUCTURE_SQL',
-      'begin', 'exec:TABLE_LOCK_SQL', 'q:RELATIONS_SQL', 'q:FOREIGN_OBJECTS_SQL', 'q:MIGRATIONS_COLUMNS_SQL', 'q:EXECUTED_SQL', 'q:STRUCTURE_SQL', 'q:TABLES_EMPTY_SQL', 'revert', 'q:MIGRATIONS_PRIVILEGES_SQL', 'q:RELATIONS_SQL', 'q:FOREIGN_OBJECTS_SQL', 'q:MIGRATIONS_COLUMNS_SQL', 'q:EXECUTED_SQL',
+      'begin', 'exec:TABLE_LOCK_SQL', 'q:RELATIONS_SQL', 'q:FOREIGN_OBJECTS_SQL', 'q:MIGRATIONS_COLUMNS_SQL', 'q:EXECUTED_SQL', 'q:STRUCTURE_SQL', 'q:TABLES_EMPTY_SQL', 'revert', 'q:MIGRATIONS_PRIVILEGES_SQL', 'q:RELATIONS_SQL', 'q:FOREIGN_OBJECTS_SQL', 'q:MIGRATIONS_COLUMNS_SQL', 'q:EXECUTED_SQL', 'q:STRUCTURE_SQL',
       'commit', 'q:TRANSACTION_CLOSED_SQL', 'q:UNLOCK_SQL', 'close']);
-    expect(r.result).toMatchObject({ outcome: 'reverted', ok: true, state: 'fresh', exit: 0 });
+    expect(r.result).toMatchObject({ outcome: 'reverted', ok: true, state: 'upgradable', exit: 0 });
   });
   it('B. un fallo (o un tiempo agotado) del LOCK impide la reversión: ROLLBACK, sin comprobación de vacío y sin COMMIT', async () => {
     for (const mode of ['throw', 'hang'] as const) {

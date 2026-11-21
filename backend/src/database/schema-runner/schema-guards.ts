@@ -19,15 +19,20 @@ const rowsOf = (value: unknown): Row[] | null => (Array.isArray(value) && value.
 
 /* ----------------------------- arguments and confirmation ----------------------------- */
 
-export interface ParsedArguments { readonly command: SchemaCommand; readonly confirm: string }
+export interface ParsedArguments { readonly command: SchemaCommand; readonly confirm: string; readonly showDefinitions: boolean }
 
-/** `<command> --env=test --target=agenda_test --confirm=<token>`: each flag exactly once, nothing else. */
+/** Opciones exactas; --show-definitions es opcional, sin valor y exclusivo de plan. */
 export function parseArguments(argv: readonly string[]): ParsedArguments {
   if (!Array.isArray(argv) || argv.some(a => typeof a !== 'string')) throw new SchemaRunnerError('args_invalid');
   const [command, ...flags] = argv;
   if (!(COMMANDS as readonly string[]).includes(command)) throw new SchemaRunnerError('args_invalid');
   const found: Record<'env' | 'target' | 'confirm', string[]> = { env: [], target: [], confirm: [] };
+  let showDefinitions = false;
   for (const flag of flags) {
+    if (flag === '--show-definitions') {
+      if (command !== 'plan' || showDefinitions) throw new SchemaRunnerError('args_invalid');
+      showDefinitions = true; continue;
+    }
     const match = /^--(env|target|confirm)=([\s\S]*)$/.exec(flag);
     if (!match) throw new SchemaRunnerError('args_invalid');
     found[match[1] as 'env' | 'target' | 'confirm'].push(match[2]);
@@ -36,7 +41,7 @@ export function parseArguments(argv: readonly string[]): ParsedArguments {
   if (found.env[0] === 'production' || found.env[0] === 'development') throw new SchemaRunnerError('env_forbidden');
   if (found.env[0] !== TARGET.env) throw new SchemaRunnerError('args_invalid');
   if (found.target[0] !== TARGET.database) throw new SchemaRunnerError('target_invalid');
-  return Object.freeze({ command: command as SchemaCommand, confirm: found.confirm[0] });
+  return Object.freeze({ command: command as SchemaCommand, confirm: found.confirm[0], showDefinitions });
 }
 
 /** Digest of what the manifest is: names and pinned digests, in order. */

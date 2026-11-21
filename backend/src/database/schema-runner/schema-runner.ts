@@ -1,4 +1,4 @@
-import { evaluateStructure, derivePrefix, type StructureStatus } from './schema-structure';
+import { definitionLines, evaluateStructure, derivePrefix, type DefinitionLine, type StructureRow, type StructureStatus } from './schema-structure';
 import { SCHEMA_MANIFEST, verifyManifest, type ManifestEntry } from '../migrations/schema-manifest';
 import {
   classifyState, decideAction, evaluateExecuted, tablesOfPrefix, evaluateApplicationPrivileges, evaluateEmpty, evaluateIdentity, evaluateLock, evaluateMigrationsTablePrivileges,
@@ -50,6 +50,8 @@ export type Outcome = 'planned' | 'applied' | 'reverted' | 'already_applied' | '
 export type Closure = 'verified' | 'unverified';
 
 export interface RunResult {
+  readonly definitions: readonly DefinitionLine[];
+  readonly definitionsOmitted: boolean;
   readonly command: SchemaCommand | null;
   readonly target: typeof TARGET.database;
   readonly outcome: Outcome;
@@ -121,6 +123,7 @@ function bounded<T>(timers: Timers, fn: () => Promise<T>, ms: number): Promise<T
 }
 
 export interface RunInput {
+  readonly showDefinitions?: boolean;
   readonly manifest?: readonly ManifestEntry[];
   readonly command: SchemaCommand;
   readonly port: SchemaPort;
@@ -139,6 +142,7 @@ export async function runSchema(input: RunInput): Promise<RunResult> {
   const manifestNames = () => manifest.map(e => e.name);
   const started = clock();
   const out = {
+    definitions: Object.freeze([]) as readonly DefinitionLine[], definitionsOmitted: false,
     structure: 'unchecked' as StructureStatus, structureDigest: null as string | null,
     stage: 'start', state: null as SchemaState | null, executed: [] as string[], pending: [] as string[], findings: [] as RunnerCode[],
     committed: false, transaction: 'none' as RunResult['transaction'], lock: 'not_acquired' as RunResult['lock'], code: null as RunnerCode | null,
@@ -185,9 +189,14 @@ export async function runSchema(input: RunInput): Promise<RunResult> {
   };
   async function checkStructure(k: number) {
     if (k === 0) { out.structure = 'unchecked'; out.structureDigest = null; return; }
-    const result = evaluateStructure(await read('structure', STRUCTURE_SQL, [tablesOfPrefix(manifest, k)]), manifest, k);
+    const rows = await read('structure', STRUCTURE_SQL, [tablesOfPrefix(manifest, k)]);
+    const result = evaluateStructure(rows, manifest, k);
     out.structure = result.structure; out.structureDigest = result.structureDigest;
     must(result.code);
+    if (command === 'plan' && input.showDefinitions && ['verified', 'definitions_unpinned'].includes(result.structure)) {
+      const lines = definitionLines(rows as StructureRow[]);
+      out.definitions = lines.definitions; out.definitionsOmitted = lines.definitionsOmitted;
+    }
   }
 
   async function planFlow() {
@@ -296,6 +305,7 @@ export async function runSchema(input: RunInput): Promise<RunResult> {
   const clean = out.code === null && out.closure === 'verified' && out.resources === 'closed';
   const exit = clean ? EXIT.ok : (commitAmbiguous || out.closure === 'unverified' ? EXIT.unconfirmed : EXIT.refused);
   return Object.freeze({
+    definitions: out.definitions, definitionsOmitted: out.definitionsOmitted,
     command, target: TARGET.database, outcome: out.outcome, ok: exit === 0, code: out.code, sqlstate: out.sqlstate, state: out.state, stage: out.stage, structure: out.structure, structureDigest: out.structureDigest,
     executed: Object.freeze([...out.executed]), pending: Object.freeze([...out.pending]), findings: Object.freeze([...out.findings]),
     committed: out.committed, transaction: out.transaction, lock: out.lock, closure: out.closure, resources: out.resources, elapsedMs, exit,
@@ -305,6 +315,7 @@ export async function runSchema(input: RunInput): Promise<RunResult> {
 /** A run refused before any connection: arguments, credentials, options. */
 export function refusal(command: SchemaCommand | null, code: RunnerCode, elapsedMs = 0, exit: 2 | 3 = 2): RunResult {
   return Object.freeze({
+    definitions: Object.freeze([]), definitionsOmitted: false,
     command, target: TARGET.database, outcome: 'refused', ok: false, code, sqlstate: null, state: null, structure: 'unchecked', structureDigest: null, stage: 'start', executed: Object.freeze([]),
     pending: Object.freeze([]), findings: Object.freeze([]), committed: false, transaction: 'none', lock: 'not_acquired',
     closure: exit === 3 ? 'unverified' : 'verified', resources: exit === 3 ? 'unverified' : 'closed', elapsedMs, exit,
@@ -317,7 +328,7 @@ const safeCode = (value: string | null): string | null => (value !== null && RUN
 
 /** The single line printed for a result: a closed projection built field by field, never a spread of the result. */
 export function summaryOf(result: RunResult): Record<string, unknown> {
-  return {
+  const projection: Record<string, unknown> = {
     command: result.command, target: result.target, outcome: result.outcome, ok: result.ok === true, code: safeCode(result.code),
     sqlstate: result.sqlstate !== null && /^[0-9A-Z]{5}$/.test(result.sqlstate) ? result.sqlstate : null, state: result.state, stage: safe(result.stage),
     structure: ['verified', 'definitions_unpinned', 'drift', 'unchecked'].includes(result.structure) ? result.structure : 'unchecked',
@@ -326,4 +337,6 @@ export function summaryOf(result: RunResult): Record<string, unknown> {
     findings: result.findings.filter(c => RUNNER_CODES.includes(c)), committed: result.committed === true, transaction: result.transaction,
     lock: result.lock, closure: result.closure, resources: result.resources, elapsedMs: Number.isFinite(result.elapsedMs) ? result.elapsedMs : 0, exit: result.exit,
   };
+  if (result.definitionsOmitted === true) projection.definitionsOmitted = true;
+  return projection;
 }

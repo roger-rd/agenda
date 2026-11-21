@@ -81,9 +81,11 @@ export function registerCompaniesOfflineTests(): void {
       expect(targets.emails.includes(foreign.email) || targets.organizationNames.includes(foreign.organizationName)).toBe(false);
       expect(() => companiesMarkers('bad')).toThrow('runId');
     });
-    test('limpieza pinned parametrizada en orden fijo de seis tablas', () => {
+    test('limpieza pinned parametrizada en orden fijo de ocho tablas', () => {
       const id = 'abcdef012345', targets = companiesCleanupTargets(id);
       expect(Object.values(companiesCleanupSQL)).toEqual([
+        'DELETE FROM public.invitation_companies WHERE organization_id IN (SELECT id FROM public.organizations WHERE name = ANY($1::text[]))',
+        'DELETE FROM public.invitations WHERE organization_id IN (SELECT id FROM public.organizations WHERE name = ANY($1::text[]))',
         'DELETE FROM public.user_sessions WHERE user_id IN (SELECT id FROM public.users WHERE email = ANY($1::text[]))',
         'DELETE FROM public.company_accesses WHERE membership_id IN (SELECT id FROM public.organization_memberships WHERE user_id IN (SELECT id FROM public.users WHERE email = ANY($1::text[])) OR organization_id IN (SELECT id FROM public.organizations WHERE name = ANY($2::text[])))',
         'DELETE FROM public.companies WHERE organization_id IN (SELECT id FROM public.organizations WHERE name = ANY($1::text[]))',
@@ -92,23 +94,23 @@ export function registerCompaniesOfflineTests(): void {
         'DELETE FROM public.organizations WHERE name = ANY($1::text[])',
       ]);
       expect(Object.values(companiesCleanupSQL).map(sql => sql.match(/^DELETE FROM public\.(\w+) WHERE/)?.[1]))
-        .toEqual(['user_sessions', 'company_accesses', 'companies', 'organization_memberships', 'users', 'organizations']);
+        .toEqual(['invitation_companies', 'invitations', 'user_sessions', 'company_accesses', 'companies', 'organization_memberships', 'users', 'organizations']);
       for (const sql of Object.values(companiesCleanupSQL)) {
         expect(sql).toContain('$1'); expect(sql).not.toMatch(/LIKE|~|TRUNCATE/i);
         for (const value of [id, ...targets.emails, ...targets.organizationNames]) expect(sql).not.toContain(value);
         expect(() => assertReadonlyQuery(sql)).toThrow('readonly');
       }
     });
-    test('registro exclusivo, ocho tablas, reloj real y cierre garantizado', () => {
+    test('registro exclusivo, diez tablas, reloj real y cierre garantizado', () => {
       const source = readFileSync(join(__dirname, 'connected.ts'), 'utf8');
       expect(source).toContain("if (phase === 'companies') registerCompaniesTest(");
       expect(source).toContain("const companiesReservations = phase === 'companies' ? companiesMarkers(id) : undefined;");
       expect(source).toContain("moduleRef = phase === 'auth'\n          ? await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(Clock).useValue(clock).compile()\n          : await Test.createTestingModule({ imports: [AppModule] }).compile();");
       expect(source).toContain("} else if (phase === 'auth' || phase === 'companies') {\n      afterAll(async () => { try { if (gate.isArmed && observer?.isInitialized) await cleanup(); } finally { await close(); } });");
-      expect(source).toContain("const tables = ['organizations', 'users', 'organization_memberships', 'companies', 'company_accesses', 'posts', 'post_comments', 'user_sessions'] as const;");
+      expect(source).toContain("const tables = ['organizations', 'users', 'organization_memberships', 'companies', 'company_accesses', 'user_sessions', 'posts', 'post_comments', 'invitations', 'invitation_companies'] as const;");
       const cleanup = source.slice(source.indexOf('async function cleanupCompanies('), source.indexOf('async function register('));
       expect(cleanup).toContain('await empty();');
-      const order = ['sessions', 'accesses', 'companies', 'memberships', 'users', 'organizations'].map(key => cleanup.indexOf(`companiesCleanupSQL.${key},`));
+      const order = ['invitationCompanies', 'invitations', 'sessions', 'accesses', 'companies', 'memberships', 'users', 'organizations'].map(key => cleanup.indexOf(`companiesCleanupSQL.${key},`));
       expect(order.every((position, i) => position >= 0 && (i === 0 || position > order[i - 1]))).toBe(true);
       expect(readFileSync(join(__dirname, 'load-connected.cjs'), 'utf8')).toContain("| 'companies'");
     });

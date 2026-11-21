@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { manifestDigest } from '../schema-runner/schema-guards';
 import { TABLE_ORDER } from './initial-schema.statements';
 import * as fs from 'node:fs';
@@ -21,9 +22,9 @@ const fakeRunner = (database: unknown, options: { failAt?: number } = {}) => {
 };
 
 describe('manifiesto explícito', () => {
-  it('contiene exactamente la migración inicial, congelada, con su clase, huella y alcance de bajada', () => {
+  it('contiene exactamente las dos migraciones y conserva la inicial, congelada, con su clase, huella y alcance de bajada', () => {
     expect(Object.isFrozen(SCHEMA_MANIFEST)).toBe(true);
-    expect(SCHEMA_MANIFEST).toHaveLength(1);
+    expect(SCHEMA_MANIFEST).toHaveLength(2);
     const [entry] = SCHEMA_MANIFEST;
     expect(Object.isFrozen(entry)).toBe(true);
     expect(entry).toMatchObject({ name: 'InitialSchema1794009600000', timestamp: 1794009600000, migration: InitialSchema1794009600000,
@@ -125,9 +126,11 @@ describe('alcance de esta etapa', () => {
 });
 
 it('los metadatos estructurales no alteran las identidades ni el digest del manifiesto real', () => {
-  expect(SCHEMA_MANIFEST).toHaveLength(1);
+  expect(SCHEMA_MANIFEST).toHaveLength(2);
   expect(SCHEMA_MANIFEST[0].tables).toBe(TABLE_ORDER);
   expect(SCHEMA_MANIFEST[0].definitionsDigest).toBeNull();
-  expect(manifestDigest()).toBe('fb855b5be7197bcdb38192243de71402d36fa09df6a5135542195b8151ada11d');
-  expect(manifestDigest([{ ...SCHEMA_MANIFEST[0], tables: ['synthetic'], definitionsDigest: 'a'.repeat(64) }])).toBe(manifestDigest());
+  expect(manifestDigest()).toBe(createHash('sha256').update(JSON.stringify(SCHEMA_MANIFEST.map(e => [e.name, e.sha256]))).digest('hex'));
+  expect(manifestDigest(SCHEMA_MANIFEST.slice(0, 1))).toBe('fb855b5be7197bcdb38192243de71402d36fa09df6a5135542195b8151ada11d');
+  expect(SCHEMA_MANIFEST.map(e => e.definitionsDigest)).toEqual([null, null]);
+  expect(manifestDigest([{ ...SCHEMA_MANIFEST[0], tables: ['synthetic'], definitionsDigest: 'a'.repeat(64) }, SCHEMA_MANIFEST[1]])).toBe(manifestDigest());
 });

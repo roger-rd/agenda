@@ -1,4 +1,9 @@
-import { runCli, type CliDeps } from './cli';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import * as ts from 'typescript';
+import { SCHEMA_MANIFEST } from '../migrations/schema-manifest';
+import { derivePrefix, definitionsDigest, normalizeExpression } from './schema-structure';
+import { DEFINITIONS_PREFIX, runCli, type CliDeps } from './cli';
 import type { CredentialFs, FileFacts } from './credential-file';
 import { confirmationFor } from './schema-guards';
 import type { SchemaPort } from './schema-runner';
@@ -20,8 +25,10 @@ function fakeFs(over: { mode?: number; text?: string } = {}) {
 }
 
 /** A plan-capable port: answers only what a plan asks for. */
-function planPort(over: { connectFails?: boolean; hang?: boolean; onConnect?: () => void; boom?: boolean } = {}) {
+function planPort(over: { prefix?: 1 | 2; structure?: unknown; connectFails?: boolean; hang?: boolean; onConnect?: () => void; boom?: boolean } = {}) {
   const events: string[] = []; let tx = false; let closed = false;
+  const entries = SCHEMA_MANIFEST.slice(0, over.prefix ?? 0);
+  const tables = entries.flatMap(e => [...e.tables]);
   const port: SchemaPort = {
     async connect() { events.push('connect'); over.onConnect?.(); if (over.connectFails) throw Object.assign(new Error(SECRET), { code: '28P01' }); if (over.hang) await new Promise<never>(() => undefined); },
     async query(sql) {
@@ -32,7 +39,18 @@ function planPort(over: { connectFails?: boolean; hang?: boolean; onConnect?: ()
           transaction_read_only: 'on', default_read_only: 'on', standard_conforming_strings: 'on', current_schema: 'public', effective_search_path: 'public', statement_timeout: '15s',
           lock_timeout: '5s', idle_in_transaction_session_timeout: '30s', application_name: 'agenda-schema-runner', rolsuper: false, rolcreaterole: false, rolcreatedb: false,
           rolreplication: false, rolbypassrls: false, rolcanlogin: true, can_use_public: true, can_create_public: true, owns_database: true, event_triggers: 0, owner_memberships: 0, app_role_exists: true }];
-        case SQL.RELATIONS_SQL: return []; case SQL.FOREIGN_OBJECTS_SQL: return [{ routines: 0, types: 0, extensions: 0 }];
+        case SQL.RELATIONS_SQL: return over.prefix ? [...tables.map(name => ({ name, kind: 'r' })),
+          { name: 'schema_migrations', kind: 'r' }, { name: 'schema_migrations_id_seq', kind: 'S' }] : [];
+        case SQL.MIGRATIONS_COLUMNS_SQL: return [{ name: 'id', type: 'integer' }, { name: 'timestamp', type: 'bigint' }, { name: 'name', type: 'character varying' }];
+        case SQL.EXECUTED_SQL: return entries.map(e => ({ name: e.name, timestamp: String(e.timestamp) }));
+        case SQL.STRUCTURE_SQL: return 'structure' in over ? over.structure : derivePrefix(SCHEMA_MANIFEST, over.prefix!);
+        case SQL.APPLICATION_PRIVILEGES_SQL: return tables.flatMap(name => ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'].map(privilege =>
+          ({ name, privilege, effective: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'].includes(privilege), grantable: false })));
+        case SQL.MIGRATIONS_PRIVILEGES_SQL: return [
+          ...['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'].map(privilege => ({ kind: 'table', privilege })),
+          ...['SELECT', 'INSERT', 'UPDATE', 'REFERENCES'].map(privilege => ({ kind: 'column', privilege })),
+          ...['USAGE', 'SELECT', 'UPDATE'].map(privilege => ({ kind: 'sequence', privilege })),
+        ].map(r => ({ ...r, effective: false, grantable: false })); case SQL.FOREIGN_OBJECTS_SQL: return [{ routines: 0, types: 0, extensions: 0 }];
         case SQL.TRANSACTION_CLOSED_SQL: return [{ no_xid: !tx, no_backend_xid: !tx, implicit_transaction: !tx }];
         default: throw new Error(SECRET);
       }
@@ -82,7 +100,7 @@ describe('línea de órdenes del runner de esquema', () => {
       ['confirmación de otra orden', args('apply', confirmationFor('plan'))], ['confirmación de revert para apply', args('apply', confirmationFor('revert'))],
       ['resumen de manifiesto erróneo', args('apply', 'APPLY:agenda_test:00000000')], ['producción', ['plan', '--env=production', '--target=agenda_test', '--confirm=PLAN:agenda_test']],
       ['desarrollo', ['plan', '--env=development', '--target=agenda_test', '--confirm=PLAN:agenda_test']], ['otra base', ['plan', '--env=test', '--target=agenda_dev', '--confirm=PLAN:agenda_test']],
-      ['opción extra', [...args('plan'), '--force']], ['opción repetida', [...args('plan'), '--env=test']], ['argumento suelto', [...args('plan'), 'x']],
+      ['opción extra', [...args('plan'), '--force']], ['definiciones con apply', [...args('apply'), '--show-definitions']], ['opción repetida', [...args('plan'), '--env=test']], ['argumento suelto', [...args('plan'), 'x']],
     ])('%s', async (_name, argv) => {
       const f = fakeFs(); let opened = 0;
       const d = deps(argv as string[], { fs: f.fs, openPort: () => { opened++; return planPort().port; } });
@@ -167,5 +185,57 @@ describe('línea de órdenes del runner de esquema', () => {
   it('el token de bloqueo y las sentencias son los de F1.2b-1', () => {
     expect(LOCK_KEY).toBe('4620462443122130743');
     expect(SQL.LOCK_SQL).toContain('pg_try_advisory_lock($1::bigint)');
+  });
+});
+
+describe('contrato de salida de definiciones y ruta compilada', () => {
+  it.each([1, 2] as const)('stdout exacto para prefijo %i y catálogo en cualquier orden', async prefix => {
+    const rows = derivePrefix(SCHEMA_MANIFEST, prefix);
+    const digest = definitionsDigest(rows);
+    const lines = rows.flatMap(r => r.kind === 'con' && r.type === 'c' ? [{ kind: 'check', table: r.table_name, name: r.name, definition: normalizeExpression(r.definition!) }] :
+      r.kind === 'idx' && r.predicate !== null ? [{ kind: 'predicate', table: r.table_name, name: r.name, definition: normalizeExpression(r.predicate!) }] : [])
+      .sort((a, b) => { for (const key of ['kind', 'table', 'name'] as const) { if (a[key] < b[key]) return -1; if (a[key] > b[key]) return 1; } return 0; });
+    const expected = [SUMMARY_PREFIX + JSON.stringify({
+      command: 'plan', target: 'agenda_test', outcome: 'planned', ok: true, code: null, sqlstate: null,
+      state: prefix === 2 ? 'applied' : 'upgradable', stage: 'structure', structure: 'definitions_unpinned', structureDigest: digest,
+      executed: SCHEMA_MANIFEST.slice(0, prefix).map(e => e.name), pending: SCHEMA_MANIFEST.slice(prefix).map(e => e.name), findings: [],
+      committed: false, transaction: 'rolled_back', lock: 'released', closure: 'verified', resources: 'closed', elapsedMs: 0, exit: 0,
+    }) + '\n', ...lines.map(line => DEFINITIONS_PREFIX + JSON.stringify(line) + '\n'),
+    DEFINITIONS_PREFIX + JSON.stringify({ structureDigest: digest, count: lines.length }) + '\n'];
+    for (const structure of [rows, [...rows].reverse()]) {
+      const f = planPort({ prefix, structure });
+      const d = deps([...args('plan'), '--show-definitions'], { openPort: () => f.port });
+      expect(await runCli(d.base)).toBe(0);
+      expect(d.lines).toEqual(expected);
+      expect(f.events.filter(e => ['exec', 'migrate', 'revert', 'commit'].includes(e))).toEqual([]);
+    }
+  });
+  it.each(['fresh', 'deriva', 'ilegible', 'omitidas'] as const)('solo resumen en %s', async mode => {
+    const rows = derivePrefix(SCHEMA_MANIFEST, 2);
+    rows.find(r => r.type === 'c')!.definition = "CHECK ('á' = 'á')";
+    const f = mode === 'fresh' ? planPort() : planPort({ prefix: 2, structure: mode === 'omitidas' ? rows : mode === 'deriva' ? [] : null });
+    const d = deps([...args('plan'), '--show-definitions'], { openPort: () => f.port });
+    await runCli(d.base);
+    const result = summary(d.lines);
+    if (mode === 'omitidas') expect(result.definitionsOmitted).toBe(true);
+    expect(d.lines.join('')).not.toContain(DEFINITIONS_PREFIX);
+    expect(d.lines.join('')).not.toContain('á');
+  });
+  it('apply con el flag falla antes de credenciales incluso con confirmación correcta', async () => {
+    const f = fakeFs(), openPort = jest.fn();
+    const d = deps([...args('apply'), '--show-definitions'], { fs: f.fs, openPort });
+    expect(await runCli(d.base)).toBe(2);
+    expect(summary(d.lines).code).toBe('args_invalid');
+    expect(f.calls).toEqual([]); expect(openPort).not.toHaveBeenCalled();
+  });
+  it('compila a la ruta contractual y main solo se ejecuta como programa', () => {
+    const root = join(__dirname, '../../..');
+    const config = ts.parseConfigFileTextToJson('tsconfig.json', readFileSync(join(root, 'tsconfig.json'), 'utf8')).config as { compilerOptions: { outDir: string; rootDir: string } };
+    expect(config.compilerOptions).toMatchObject({ outDir: 'dist', rootDir: 'src' });
+    expect(join(config.compilerOptions.outDir, 'database/schema-runner/cli.js')).toBe('dist/database/schema-runner/cli.js');
+    const source = readFileSync(join(__dirname, 'cli.ts'), 'utf8');
+    expect(source).toContain('if (require.main === module) main();');
+    expect(source).toContain('<plan|apply|revert> --env=test --target=agenda_test --confirm=<token> [--show-definitions solo en plan]');
+    expect(source.indexOf('command = authorize(deps.argv)')).toBeLessThan(source.indexOf('const config = loadOwnerConfiguration'));
   });
 });

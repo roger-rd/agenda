@@ -43,6 +43,19 @@ export const SCHEMA_MANIFEST: readonly ManifestEntry[] = Object.freeze([
     downScope: 'development-and-test-only',
     immutable: true,
   } as const),
+  Object.freeze({
+    name: 'Invitations1795219200000',
+    timestamp: 1795219200000,
+    migration: Invitations1795219200000,
+    up: INVITATION_UP,
+    down: INVITATION_DOWN,
+    sha256: 'e2c0f8061c469fcd8ae73b7145d321c0f4c1d0fb46e7d1c12d34bbd47a48f11f',
+    counts: INVITATION_COUNTS,
+    tables: INVITATION_TABLES,
+    definitionsDigest: null,
+    downScope: 'development-and-test-only',
+    immutable: true,
+  } as const),
 ]);
 
 /** Problems found in a manifest; empty means consistent. Pure, so the future runner can call it before touching a database. */
@@ -71,21 +84,3 @@ export function verifyManifest(entries: readonly ManifestEntry[] = SCHEMA_MANIFE
   }
   return problems;
 }
-
-/** Activate in SCHEMA_MANIFEST only alongside runner support for databases with an already applied prefix.
- * That generalization belongs to a later, separately authorized block. */
-export const PENDING_MIGRATIONS: readonly ManifestEntry[] = Object.freeze([
-  Object.freeze({
-    name: 'Invitations1795219200000',
-    timestamp: 1795219200000,
-    migration: Invitations1795219200000,
-    up: INVITATION_UP,
-    down: INVITATION_DOWN,
-    sha256: 'e2c0f8061c469fcd8ae73b7145d321c0f4c1d0fb46e7d1c12d34bbd47a48f11f',
-    counts: INVITATION_COUNTS,
-    tables: INVITATION_TABLES,
-    definitionsDigest: null,
-    downScope: 'development-and-test-only',
-    immutable: true,
-  } as const),
-]);

@@ -1,12 +1,12 @@
 import { DataSource, type EntityMetadata } from 'typeorm';
 import { ENTITIES, INVITATION_ENTITIES } from '../../persistence/entities';
-import { SCHEMA_MANIFEST, PENDING_MIGRATIONS } from '../migrations/schema-manifest';
+import { SCHEMA_MANIFEST } from '../migrations/schema-manifest';
 import { UP_STATEMENTS as INITIAL } from '../migrations/initial-schema.statements';
 import { UP_STATEMENTS as SECOND } from '../migrations/invitations.statements';
-import { deriveStructure, derivePrefix, shapeLines, definitionsDigest, evaluateStructure, normalizeExpression, type StructureRow } from './schema-structure';
+import { definitionLines, footprintOf, deriveStructure, derivePrefix, shapeLines, definitionsDigest, evaluateStructure, normalizeExpression, type StructureRow } from './schema-structure';
 
-// Only specs inspect entity metadata. The pending catalogue is never activated in production.
-const combined = [...SCHEMA_MANIFEST, ...PENDING_MIGRATIONS];
+// Solo las pruebas inspeccionan metadatos; las entidades de invitaciones siguen fuera del registro activo.
+const combined = SCHEMA_MANIFEST;
 let source: DataSource;
 beforeAll(async () => {
   source = new DataSource({ type: 'postgres', schema: 'public', entities: [...ENTITIES, ...INVITATION_ENTITIES], synchronize: false });
@@ -45,7 +45,7 @@ const clone = (rows: StructureRow[]) => rows.map(r => ({ ...r, columns: r.column
 describe('forma offline y metadatos independientes', () => {
   it.each([
     ['inicial', INITIAL, SCHEMA_MANIFEST[0].tables, [68, 64, 26]],
-    ['invitaciones', SECOND, PENDING_MIGRATIONS[0].tables, [14, 16, 7]],
+    ['invitaciones', SECOND, SCHEMA_MANIFEST[1].tables, [14, 16, 7]],
     ['acumulado', [...INITIAL, ...SECOND], combined.flatMap(e => [...e.tables]), [82, 80, 33]],
   ] as const)('%s coincide con metadatos y huella numérica', (_label, statements, tables, footprint) => {
     const parsed = deriveStructure(statements);
@@ -126,5 +126,26 @@ describe('catálogo falso y dos niveles de verificación', () => {
     expect(definitionsDigest(rows)).toBe(definitionsDigest(original));
     expect(normalizeExpression("name = 'a  b'")).not.toBe(normalizeExpression("name = 'a b'"));
     expect(evaluateStructure(rows, pinned, 2).structure).toBe('verified');
+  });
+});
+
+it.each([[1, { columns: 68, constraints: 64, indexes: 26 }], [2, { columns: 82, constraints: 80, indexes: 33 }]] as const)(
+  'huella del prefijo %i cuenta constraints e índices de respaldo', (k, expected) => {
+    expect(footprintOf(derivePrefix(SCHEMA_MANIFEST, k))).toEqual(expected);
+  });
+
+describe('límites cerrados de las líneas de definición', () => {
+  const rows = () => derivePrefix(SCHEMA_MANIFEST, 2);
+  it.each(['table_name', 'name'] as const)('descarta el conjunto por identificador %s inseguro', field => {
+    for (const invalid of ['a.b', 'a;DROP', 'á', 'a'.repeat(64), 'a\n']) {
+      const input = rows(); input.find(r => r.type === 'c')![field] = invalid;
+      expect(definitionLines(input)).toEqual({ definitions: [], definitionsOmitted: true });
+    }
+  });
+  it('el límite también se aplica tras normalizar y a predicados parciales', () => {
+    for (const predicate of ["'á' = 'á'", 'id > 0\n', '('.repeat(700) + 'id' + ')'.repeat(700)]) {
+      const input = rows(); input.find(r => r.kind === 'idx' && r.predicate !== null)!.predicate = predicate;
+      expect(definitionLines(input)).toEqual({ definitions: [], definitionsOmitted: true });
+    }
   });
 });

@@ -69,9 +69,9 @@ export function registerAuthOfflineTests(): void {
       for (const m of [all.unknown, markers(id, 99, 'foreign')]) {
         expect(targets.emails.includes(m.email) || targets.organizationNames.includes(m.organizationName)).toBe(false);
       }
-      expect(Object.keys(authCleanupSQL)).toEqual(['sessions', 'memberships', 'users', 'organizations']);
+      expect(Object.keys(authCleanupSQL)).toEqual(['invitationCompanies', 'invitations', 'sessions', 'memberships', 'users', 'organizations']);
       expect(Object.values(authCleanupSQL).map(sql => sql.match(/^DELETE FROM public\.(\w+) WHERE/)?.[1]))
-        .toEqual(['user_sessions', 'organization_memberships', 'users', 'organizations']);
+        .toEqual(['invitation_companies', 'invitations', 'user_sessions', 'organization_memberships', 'users', 'organizations']);
       for (const sql of Object.values(authCleanupSQL)) {
         expect(sql).toContain('ANY($1::text[])'); expect(sql).not.toMatch(/LIKE|~|TRUNCATE/i);
         for (const value of [id, ...targets.emails, ...targets.organizationNames]) expect(sql).not.toContain(value);
@@ -98,10 +98,10 @@ export function registerAuthOfflineTests(): void {
       }
       expect(ROLES.includes('worker')).toBe(true);
     });
-    test('ocho tablas exactas, mismo empty y auth aislada de readonly', () => {
+    test('diez tablas exactas, mismo empty y auth aislada de readonly', () => {
       const source = readFileSync(join(__dirname, 'connected.ts'), 'utf8');
       const tables = source.match(/const tables = \[([^\]]+)\] as const/)![1].match(/'[^']+'/g)!.map(s => s.slice(1, -1));
-      expect(tables).toEqual(['organizations', 'users', 'organization_memberships', 'companies', 'company_accesses', 'posts', 'post_comments', 'user_sessions']);
+      expect(tables).toEqual(['organizations', 'users', 'organization_memberships', 'companies', 'company_accesses', 'user_sessions', 'posts', 'post_comments', 'invitations', 'invitation_companies']);
       expect(source).toContain('tables.map(async table =>');
       expect(source).toContain("await empty(); gate.mark('baseline');");
       expect(source.slice(source.indexOf('async function cleanup()'), source.indexOf('async function register('))).toContain('await empty();');

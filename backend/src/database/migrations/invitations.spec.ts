@@ -6,7 +6,7 @@ import * as ts from 'typescript';
 import { ENTITIES, INVITATION_ENTITIES, Invitation } from '../../persistence/entities';
 import { ADD_FOREIGN_KEYS, COUNTS, CREATE_INDEXES, CREATE_TABLES, DOWN_STATEMENTS, DROP_TABLES, TABLE_ORDER, UP_STATEMENTS } from './invitations.statements';
 import { UP_STATEMENTS as INITIAL_UP, COUNTS as INITIAL_COUNTS } from './initial-schema.statements';
-import { PENDING_MIGRATIONS, SCHEMA_MANIFEST, digestOf, verifyManifest } from './schema-manifest';
+import { SCHEMA_MANIFEST, digestOf, verifyManifest } from './schema-manifest';
 import { Invitations1795219200000 } from './1795219200000-invitations';
 
 /** Pure SQL builders only: never initialize, connect or execute a query. */
@@ -110,8 +110,8 @@ function measure(statements: readonly string[]) {
     footprint: { columns: definitions.reduce((n, t) => n + t.columns.length, 0),
       constraints: primaryKeys + uniques + checks + foreignKeys, indexes: primaryKeys + uniques + indexes } };
 }
-// pendiente de aplicar; test/pg conserva 68/64/26 hasta que la migración se aplique y se verifique contra agenda_test
-const PENDING_FOOTPRINT = Object.freeze({ columns: 82, constraints: 80, indexes: 33 });
+// El arnés connected exige las dos migraciones aplicadas antes de ejecutarse.
+const COMBINED_FOOTPRINT = Object.freeze({ columns: 82, constraints: 80, indexes: 33 });
 
 describe('invitaciones pendientes: catálogo y metadatos offline', () => {
   it('coincide con TypeORM sin conexión, incluidas acciones, índice parcial y bajada', () => {
@@ -164,19 +164,23 @@ describe('invitaciones pendientes: catálogo y metadatos offline', () => {
     for (const key of Object.keys(COUNTS) as (keyof typeof COUNTS)[]) expect(combined.counts[key]).toBe(INITIAL_COUNTS[key] + COUNTS[key]);
     expect(measure(INITIAL_UP).footprint).toEqual({ columns: 68, constraints: 64, indexes: 26 });
     expect(measure(UP_STATEMENTS).footprint).toEqual({ columns: 14, constraints: 16, indexes: 7 });
-    expect(combined.footprint).toEqual(PENDING_FOOTPRINT);
+    expect(combined.footprint).toEqual(COMBINED_FOOTPRINT);
   });
-  it('mantiene el manifiesto inicial intacto y fija la huella pendiente', () => {
-    expect(SCHEMA_MANIFEST).toHaveLength(1);
+  it('conserva la inicial y activa invitaciones con su huella inmutable', () => {
+    expect(SCHEMA_MANIFEST).toHaveLength(2);
     expect(SCHEMA_MANIFEST[0].sha256).toBe('33d0baa69ac1943dd6908af3382456fcecf3048ccd0ba282a466a32aa958f0ab');
-    expect(PENDING_MIGRATIONS).toHaveLength(1);
-    expect(Object.isFrozen(PENDING_MIGRATIONS)).toBe(true);
-    expect(Object.isFrozen(PENDING_MIGRATIONS[0])).toBe(true);
-    expect(PENDING_MIGRATIONS[0]).toMatchObject({ name: 'Invitations1795219200000', timestamp: 1795219200000,
+    expect(SCHEMA_MANIFEST[1].migration).toBe(Invitations1795219200000);
+    expect(SCHEMA_MANIFEST[1].up).toBe(UP_STATEMENTS);
+    expect(SCHEMA_MANIFEST[1].down).toBe(DOWN_STATEMENTS);
+    expect(SCHEMA_MANIFEST[1].tables).toBe(TABLE_ORDER);
+    expect(SCHEMA_MANIFEST[1].definitionsDigest).toBeNull();
+    expect(Object.isFrozen(SCHEMA_MANIFEST)).toBe(true);
+    expect(Object.isFrozen(SCHEMA_MANIFEST[1])).toBe(true);
+    expect(SCHEMA_MANIFEST[1]).toMatchObject({ name: 'Invitations1795219200000', timestamp: 1795219200000,
       sha256: 'e2c0f8061c469fcd8ae73b7145d321c0f4c1d0fb46e7d1c12d34bbd47a48f11f', immutable: true, downScope: 'development-and-test-only', counts: COUNTS });
-    expect(PENDING_MIGRATIONS[0].timestamp).toBeGreaterThan(SCHEMA_MANIFEST[0].timestamp);
-    expect(digestOf(UP_STATEMENTS, DOWN_STATEMENTS)).toBe(PENDING_MIGRATIONS[0].sha256);
-    expect(verifyManifest([...SCHEMA_MANIFEST, ...PENDING_MIGRATIONS])).toEqual([]);
+    expect(SCHEMA_MANIFEST[1].timestamp).toBeGreaterThan(SCHEMA_MANIFEST[0].timestamp);
+    expect(digestOf(UP_STATEMENTS, DOWN_STATEMENTS)).toBe(SCHEMA_MANIFEST[1].sha256);
+    expect(verifyManifest(SCHEMA_MANIFEST)).toEqual([]);
   });
   it('oculta el hash en selección, serialización e inspección y conserva ocho entidades iniciales', () => {
     expect(metas[0].columns.find(c => c.databaseName === 'token_hash')!.isSelect).toBe(false);

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { SCHEMA_MANIFEST, type ManifestEntry } from '../migrations/schema-manifest';
 import { TABLE_ORDER } from '../migrations/initial-schema.statements';
 import {
@@ -9,12 +10,12 @@ import { SchemaRunnerError, type SchemaCommand } from './schema-target';
 
 const codeOf = (fn: () => unknown) => { try { fn(); } catch (e) { return e instanceof SchemaRunnerError ? e.code : 'other'; } return null; };
 const tables = [...TABLE_ORDER];
-const short = manifestDigest().slice(0, 8);
+const short = createHash('sha256').update(JSON.stringify(SCHEMA_MANIFEST.map(e => [e.name, e.sha256]))).digest('hex').slice(0, 8);
 
 describe('argumentos y confirmación', () => {
   const base = ['--env=test', '--target=agenda_test'];
   it('acepta cada orden con sus tres opciones exactas', () => {
-    expect(parseArguments(['plan', ...base, '--confirm=PLAN:agenda_test'])).toEqual({ command: 'plan', confirm: 'PLAN:agenda_test' });
+    expect(parseArguments(['plan', ...base, '--confirm=PLAN:agenda_test'])).toEqual({ command: 'plan', confirm: 'PLAN:agenda_test', showDefinitions: false });
     expect(parseArguments(['apply', '--confirm=x', ...base]).command).toBe('apply');
     expect(parseArguments(['revert', ...base, '--confirm=x']).command).toBe('revert');
   });
@@ -93,7 +94,7 @@ describe('identidad de la sesión', () => {
   it.each([[undefined], [null], [[]], [[1]], [identity('apply').concat(identity('apply'))], ['x']])('filas ilegibles %j', rows => { expect(evaluateIdentity(rows, 'apply')).toBe('identity_unreadable'); });
 });
 
-const executedRows = (names: string[]) => names.map(name => ({ name, timestamp: SCHEMA_MANIFEST[0].timestamp }));
+const executedRows = (names: string[]) => names.map(name => ({ name, timestamp: SCHEMA_MANIFEST.find(e => e.name === name)?.timestamp ?? 0 }));
 const manifestNames = SCHEMA_MANIFEST.map(e => e.name);
 const relations = (over: { tables?: string[]; extra?: Row[]; migrations?: boolean; sequence?: boolean } = {}): Row[] => [
   ...(over.tables ?? tables).map(name => ({ name, kind: 'r', table_name: null })),
@@ -110,8 +111,9 @@ describe('clasificación del estado del esquema', () => {
     expect(classifyState(snap([], null))).toBe('fresh');
     expect(classifyState(snap(relations({ tables: [] }), []))).toBe('fresh');
   });
-  it('applied: 8 tablas, tabla y secuencia de migraciones, y exactamente el manifiesto', () => {
-    expect(classifyState(snap(relations(), executedRows(manifestNames)))).toBe('applied');
+  it('applied: 10 tablas, tabla y secuencia de migraciones, y exactamente el manifiesto', () => {
+    expect(classifyState(snap(relations({ tables: SCHEMA_MANIFEST.flatMap(e => [...e.tables]) }), executedRows(manifestNames)))).toBe('applied');
+    expect(classifyState(snap(relations(), executedRows([manifestNames[0]])))).toBe('upgradable');
   });
   it('partial: lo nuestro, incompleto o inconsistente', () => {
     expect(classifyState(snap(relations({ tables: tables.slice(0, 3) }), []))).toBe('partial');
@@ -258,5 +260,29 @@ describe('bloqueo, vacío de tablas y transacción cerrada', () => {
       { clientStatus: 'I', queryRunnerActive: false, server: [{ ...closedRow, no_xid: null }] }, { clientStatus: 'X', queryRunnerActive: false, server: [closedRow] },
       { clientStatus: 'I', queryRunnerActive: false, server: [{}] },
     ]) expect(evaluateTransactionClosed(evidence)).toBe('transaction_unverified');
+  });
+});
+
+describe('definiciones optativas solo en plan', () => {
+  const flags = ['--env=test', '--target=agenda_test', '--confirm=PLAN:agenda_test'];
+  it('acepta una vez y conserva la autorización de plan', () => {
+    expect(parseArguments(['plan', ...flags, '--show-definitions']).showDefinitions).toBe(true);
+    expect(authorize(['plan', ...flags, '--show-definitions'])).toBe('plan');
+    expect(parseArguments(['plan', ...flags]).showDefinitions).toBe(false);
+  });
+  it.each([
+    ['plan', '--show-definitions', '--show-definitions'], ['plan', '--show-definitions=x'],
+    ['apply', '--show-definitions'], ['revert', '--show-definitions'], ['plan', '--unknown'],
+  ])('rechaza combinación %j', (...argv) => {
+    expect(codeOf(() => parseArguments([argv[0], ...flags, ...argv.slice(1)]))).toBe('args_invalid');
+  });
+  it('dos entradas cambian los tokens de escritura calculados independientemente', () => {
+    for (const command of ['apply', 'revert'] as const) {
+      const token = `${command.toUpperCase()}:agenda_test:${short}`;
+      expect(confirmationFor(command)).toBe(token);
+      expect(authorize([command, '--env=test', '--target=agenda_test', `--confirm=${token}`])).toBe(command);
+      expect(confirmationFor(command, SCHEMA_MANIFEST.slice(0, 1))).not.toBe(token);
+    }
+    expect(confirmationFor('plan')).toBe('PLAN:agenda_test');
   });
 });

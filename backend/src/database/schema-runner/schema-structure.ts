@@ -135,3 +135,35 @@ export function evaluateStructure(input: unknown, manifest: readonly ManifestEnt
     return { structure: pin === null ? 'definitions_unpinned' : 'verified', structureDigest: digest, code: null };
   } catch { return fail(); }
 }
+
+/** Huella de catálogo: incluye los índices de respaldo de PK y UNIQUE. */
+export function footprintOf(rows: StructureRow[]): { columns: number; constraints: number; indexes: number } {
+  return { columns: rows.filter(r => r.kind === 'col').length,
+    constraints: rows.filter(r => r.kind === 'con' && ['p', 'u', 'c', 'f'].includes(r.type!)).length,
+    indexes: rows.filter(r => r.kind === 'idx').length };
+}
+
+export interface DefinitionLine {
+  readonly kind: 'check' | 'predicate'; readonly table: string; readonly name: string; readonly definition: string;
+}
+
+/** Solo recibe filas ya verificadas. Una línea insegura descarta el conjunto completo. */
+export function definitionLines(rows: readonly StructureRow[]): { definitions: readonly DefinitionLine[]; definitionsOmitted: boolean } {
+  const definitions: DefinitionLine[] = [];
+  const printable = (value: string) => value.length >= 1 && value.length <= 2000 && !/[^\x20-\x7E]/.test(value);
+  try {
+    for (const row of rows) {
+      const kind = row.kind === 'con' && row.type === 'c' ? 'check' : row.kind === 'idx' && row.predicate !== null ? 'predicate' : null;
+      if (kind === null) continue;
+      const raw = kind === 'check' ? row.definition! : row.predicate!;
+      const definition = normalizeExpression(raw);
+      if (!identifier.test(row.table_name) || row.table_name !== row.table_name.trim() || !identifier.test(row.name) || row.name !== row.name.trim() || !printable(raw) || !printable(definition)) throw new Error();
+      definitions.push(Object.freeze({ kind, table: row.table_name, name: row.name, definition }));
+    }
+  } catch { return { definitions: Object.freeze([]), definitionsOmitted: true }; }
+  definitions.sort((a, b) => {
+    for (const key of ['kind', 'table', 'name'] as const) { if (a[key] < b[key]) return -1; if (a[key] > b[key]) return 1; }
+    return 0;
+  });
+  return { definitions: Object.freeze(definitions), definitionsOmitted: false };
+}

@@ -1,4 +1,4 @@
-import { SCHEMA_MANIFEST, PENDING_MIGRATIONS } from '../migrations/schema-manifest';
+import { SCHEMA_MANIFEST } from '../migrations/schema-manifest';
 import { tablesOfPrefix } from './schema-guards';
 import { tableLockSql, tablesEmptySql } from './schema-sql';
 import { createHash } from 'node:crypto';
@@ -118,8 +118,15 @@ describe('SQL derivado y permisos limitados', () => {
     expect(tableLockSql(['b', 'a'])).toBe('LOCK TABLE "public"."b", "public"."a" IN ACCESS EXCLUSIVE MODE');
   });
   it('ninguna sentencia del runner ni de ambas migraciones concede permisos ni cambia roles', () => {
-    const statements = [...Object.values(ALL_STATEMENTS), ...[...SCHEMA_MANIFEST, ...PENDING_MIGRATIONS].flatMap(e => [...e.up, ...e.down])];
+    const statements = [...Object.values(ALL_STATEMENTS), ...SCHEMA_MANIFEST.flatMap(e => [...e.up, ...e.down])];
     for (const sql of statements) expect(withoutLiterals(sql)).not.toMatch(/\b(?:GRANT|ALTER\s+(?:ROLE|DEFAULT\s+PRIVILEGES)|CREATE\s+ROLE)\b/i);
     expect(Object.values(WRITE_STATEMENTS)).toEqual([REVOKE_MIGRATIONS_TABLE_SQL, REVOKE_MIGRATIONS_SEQUENCE_SQL]);
   });
+});
+
+it('prefijo completo bloquea diez tablas y limita vacío a las dos tablas de la última migración', () => {
+  const tables = tablesOfPrefix(SCHEMA_MANIFEST, 2);
+  expect(tables).toEqual(['organizations', 'users', 'organization_memberships', 'companies', 'company_accesses', 'user_sessions', 'posts', 'post_comments', 'invitations', 'invitation_companies']);
+  expect(tableLockSql(tables)).toBe('LOCK TABLE "public"."organizations", "public"."users", "public"."organization_memberships", "public"."companies", "public"."company_accesses", "public"."user_sessions", "public"."posts", "public"."post_comments", "public"."invitations", "public"."invitation_companies" IN ACCESS EXCLUSIVE MODE');
+  expect(tablesEmptySql(SCHEMA_MANIFEST[1].tables)).toBe('SELECT NOT EXISTS (SELECT 1 FROM "public"."invitations") AS "invitations", NOT EXISTS (SELECT 1 FROM "public"."invitation_companies") AS "invitation_companies"');
 });
