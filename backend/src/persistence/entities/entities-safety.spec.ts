@@ -93,6 +93,20 @@ describe('activación controlada de las entidades de identidad', () => {
         // Incluye imports estáticos, reexports, require e import dinámico; solo
         // se autorizan imports nombrados estáticos de los archivos exactos.
         if (ts.isStringLiteralLike(node) && /(^|\/)persistence(\/|$)/.test(node.text)) {
+          // Solo la prueba offline pendiente puede inspeccionar ambos registros; no autoriza código de ejecución.
+          if (relativeFile === 'database/migrations/invitations.spec.ts') {
+            expect(node.text).toBe('../../persistence/entities');
+            const declaration = node.parent;
+            expect(ts.isImportDeclaration(declaration)).toBe(true);
+            if (!ts.isImportDeclaration(declaration)) return;
+            expect(declaration.importClause?.name).toBeUndefined();
+            const bindings = declaration.importClause?.namedBindings;
+            expect(bindings && ts.isNamedImports(bindings)).toBe(true);
+            if (bindings && ts.isNamedImports(bindings)) {
+              expect(bindings.elements.map(e => (e.propertyName ?? e.name).text).sort()).toEqual(['ENTITIES', 'INVITATION_ENTITIES', 'Invitation']);
+            }
+            return;
+          }
           actualFiles.add(relativeFile);
           expect(allowedFiles).toContain(relativeFile);
           const target = path.relative(backendSrc, path.resolve(path.dirname(file), node.text)).split(path.sep).join('/');

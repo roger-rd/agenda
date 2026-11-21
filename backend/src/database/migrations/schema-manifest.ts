@@ -1,3 +1,5 @@
+import { Invitations1795219200000 } from './1795219200000-invitations';
+import { COUNTS as INVITATION_COUNTS, DOWN_STATEMENTS as INVITATION_DOWN, UP_STATEMENTS as INVITATION_UP } from './invitations.statements';
 import { createHash } from 'node:crypto';
 import type { MigrationInterface } from 'typeorm';
 import { InitialSchema1794009600000 } from './1794009600000-initial-schema';
@@ -11,7 +13,7 @@ export interface ManifestEntry {
   readonly down: readonly string[];
   /** SHA-256 of JSON.stringify([up, down]), pinned here independently of the statements file. */
   readonly sha256: string;
-  readonly counts: Readonly<typeof COUNTS>;
+  readonly counts: { readonly [K in keyof typeof COUNTS]: number };
   /** `down` destroys data: it is limited to development and test databases. */
   readonly downScope: 'development-and-test-only';
   readonly immutable: true;
@@ -56,3 +58,19 @@ export function verifyManifest(entries: readonly ManifestEntry[] = SCHEMA_MANIFE
   }
   return problems;
 }
+
+/** Activate in SCHEMA_MANIFEST only alongside runner support for databases with an already applied prefix.
+ * That generalization belongs to a later, separately authorized block. */
+export const PENDING_MIGRATIONS: readonly ManifestEntry[] = Object.freeze([
+  Object.freeze({
+    name: 'Invitations1795219200000',
+    timestamp: 1795219200000,
+    migration: Invitations1795219200000,
+    up: INVITATION_UP,
+    down: INVITATION_DOWN,
+    sha256: 'e2c0f8061c469fcd8ae73b7145d321c0f4c1d0fb46e7d1c12d34bbd47a48f11f',
+    counts: INVITATION_COUNTS,
+    downScope: 'development-and-test-only',
+    immutable: true,
+  } as const),
+]);

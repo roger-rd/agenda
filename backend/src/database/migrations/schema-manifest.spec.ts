@@ -118,6 +118,6 @@ describe('alcance de esta etapa', () => {
   });
   it('no existe ningún ejecutor, CLI ni DataSource de migraciones todavía', () => {
     const present = fs.readdirSync(dir).filter(f => !f.endsWith('.spec.ts')).sort();
-    expect(present).toEqual(['1794009600000-initial-schema.ts', 'initial-schema.statements.ts', 'schema-manifest.ts']);
+    expect(present).toEqual(['1794009600000-initial-schema.ts', '1795219200000-invitations.ts', 'initial-schema.statements.ts', 'invitations.statements.ts', 'schema-manifest.ts']);
   });
 });

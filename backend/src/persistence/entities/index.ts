@@ -1,3 +1,5 @@
+import { Invitation } from './invitation.entity';
+import { InvitationCompany } from './invitation-company.entity';
 import { Company } from './company.entity';
 import { CompanyAccess } from './company-access.entity';
 import { Organization } from './organization.entity';
@@ -14,3 +16,7 @@ import { UserSession } from './user-session.entity';
 export const ENTITIES = Object.freeze([Organization, User, OrganizationMembership, Company, CompanyAccess, Post, PostComment, UserSession]);
 
 export { Company, CompanyAccess, Organization, OrganizationMembership, Post, PostComment, User, UserSession };
+
+/** Pending entities: activate together with their migration in a separately authorized block. */
+export const INVITATION_ENTITIES = Object.freeze([Invitation, InvitationCompany]);
+export { Invitation, InvitationCompany };
