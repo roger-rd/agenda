@@ -86,6 +86,11 @@ describe('activación controlada de las entidades de identidad', () => {
     const outside = sources(backendSrc).filter(file => !file.startsWith(path.join(backendSrc, 'persistence') + path.sep));
     expect(outside.length).toBeGreaterThan(10);
     const actualFiles = new Set<string>();
+    const specExceptions: Record<string, readonly string[]> = {
+      'database/migrations/invitations.spec.ts': ['ENTITIES', 'INVITATION_ENTITIES', 'Invitation'],
+      'database/schema-runner/schema-structure.spec.ts': ['ENTITIES', 'INVITATION_ENTITIES'],
+    };
+    const exceptionFiles = new Set<string>();
     for (const file of outside) {
       const relativeFile = path.relative(backendSrc, file).split(path.sep).join('/');
       const source = ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true);
@@ -93,17 +98,21 @@ describe('activación controlada de las entidades de identidad', () => {
         // Incluye imports estáticos, reexports, require e import dinámico; solo
         // se autorizan imports nombrados estáticos de los archivos exactos.
         if (ts.isStringLiteralLike(node) && /(^|\/)persistence(\/|$)/.test(node.text)) {
-          // Solo la prueba offline pendiente puede inspeccionar ambos registros; no autoriza código de ejecución.
-          if (relativeFile === 'database/migrations/invitations.spec.ts') {
+          // Solo estas pruebas offline pueden inspeccionar ambos registros; no autorizan código de ejecución.
+          // Cada excepción fija el archivo, la ruta exacta y los nombres exactos importados (cualquier otro import falla).
+          const exception = specExceptions[relativeFile];
+          if (exception) {
+            exceptionFiles.add(relativeFile);
             expect(node.text).toBe('../../persistence/entities');
             const declaration = node.parent;
             expect(ts.isImportDeclaration(declaration)).toBe(true);
             if (!ts.isImportDeclaration(declaration)) return;
+            expect(declaration.moduleSpecifier).toBe(node);
             expect(declaration.importClause?.name).toBeUndefined();
             const bindings = declaration.importClause?.namedBindings;
             expect(bindings && ts.isNamedImports(bindings)).toBe(true);
             if (bindings && ts.isNamedImports(bindings)) {
-              expect(bindings.elements.map(e => (e.propertyName ?? e.name).text).sort()).toEqual(['ENTITIES', 'INVITATION_ENTITIES', 'Invitation']);
+              expect(bindings.elements.map(e => (e.propertyName ?? e.name).text).sort()).toEqual(exception);
             }
             return;
           }
@@ -133,6 +142,7 @@ describe('activación controlada de las entidades de identidad', () => {
     }
     // Una excepción inexistente o que ya no importe entidades también falla.
     expect([...actualFiles].sort()).toEqual([...allowedFiles].sort());
+    expect([...exceptionFiles].sort()).toEqual(Object.keys(specExceptions).sort());
   });
   it('las entidades de identidad resuelven sus FK sin conexión ni entidades extra', async () => {
     const entities = [User, Organization, OrganizationMembership, UserSession];

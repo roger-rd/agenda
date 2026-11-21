@@ -1,12 +1,12 @@
-import { TABLE_ORDER } from '../migrations/initial-schema.statements';
-import { SCHEMA_MANIFEST } from '../migrations/schema-manifest';
+import { evaluateStructure, derivePrefix, type StructureStatus } from './schema-structure';
+import { SCHEMA_MANIFEST, verifyManifest, type ManifestEntry } from '../migrations/schema-manifest';
 import {
-  classifyState, decideAction, evaluateApplicationPrivileges, evaluateEmpty, evaluateIdentity, evaluateLock, evaluateMigrationsTablePrivileges,
+  classifyState, decideAction, evaluateExecuted, tablesOfPrefix, evaluateApplicationPrivileges, evaluateEmpty, evaluateIdentity, evaluateLock, evaluateMigrationsTablePrivileges,
   evaluateMigrationsTableShape, evaluateTransactionClosed, evaluateUnlock, type SchemaState, type TransactionEvidence,
 } from './schema-guards';
 import {
   APPLICATION_PRIVILEGES_SQL, EXECUTED_SQL, FOREIGN_OBJECTS_SQL, IDENTITY_SQL, LOCK_SQL, MIGRATIONS_COLUMNS_SQL, MIGRATIONS_PRIVILEGES_SQL,
-  RELATIONS_SQL, REVOKE_MIGRATIONS_SEQUENCE_SQL, REVOKE_MIGRATIONS_TABLE_SQL, TABLE_LOCK_SQL, TABLES_EMPTY_SQL, TRANSACTION_CLOSED_SQL, UNLOCK_SQL,
+  RELATIONS_SQL, REVOKE_MIGRATIONS_SEQUENCE_SQL, REVOKE_MIGRATIONS_TABLE_SQL, tableLockSql, tablesEmptySql, STRUCTURE_SQL, TRANSACTION_CLOSED_SQL, UNLOCK_SQL,
 } from './schema-sql';
 import { BUDGET, ERROR_CODES, EXIT, LOCK_KEY, MIGRATIONS_TABLE, SchemaRunnerError, TARGET, type SchemaCommand, type SchemaErrorCode } from './schema-target';
 
@@ -57,6 +57,8 @@ export interface RunResult {
   readonly code: RunnerCode | null;
   readonly sqlstate: string | null;
   readonly state: SchemaState | null;
+  readonly structure: StructureStatus;
+  readonly structureDigest: string | null;
   readonly stage: string;
   readonly executed: readonly string[];
   readonly pending: readonly string[];
@@ -119,6 +121,7 @@ function bounded<T>(timers: Timers, fn: () => Promise<T>, ms: number): Promise<T
 }
 
 export interface RunInput {
+  readonly manifest?: readonly ManifestEntry[];
   readonly command: SchemaCommand;
   readonly port: SchemaPort;
   readonly clock: () => number;
@@ -128,13 +131,15 @@ export interface RunInput {
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object';
-const manifestNames = (): string[] => SCHEMA_MANIFEST.map(entry => entry.name);
 const sameNames = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((n, i) => n === b[i]);
 
 export async function runSchema(input: RunInput): Promise<RunResult> {
   const { command, port, clock, timers, aborted } = input;
+  const manifest = input.manifest ?? SCHEMA_MANIFEST;
+  const manifestNames = () => manifest.map(e => e.name);
   const started = clock();
   const out = {
+    structure: 'unchecked' as StructureStatus, structureDigest: null as string | null,
     stage: 'start', state: null as SchemaState | null, executed: [] as string[], pending: [] as string[], findings: [] as RunnerCode[],
     committed: false, transaction: 'none' as RunResult['transaction'], lock: 'not_acquired' as RunResult['lock'], code: null as RunnerCode | null,
     sqlstate: null as string | null, outcome: 'failed' as Outcome, closure: 'verified' as Closure, resources: 'closed' as RunResult['resources'],
@@ -161,21 +166,39 @@ export async function runSchema(input: RunInput): Promise<RunResult> {
       must(evaluateMigrationsTableShape(await read('state', MIGRATIONS_COLUMNS_SQL)));
       executed = await read('state', EXECUTED_SQL);
     }
-    const state = classifyState({ relations, foreignObjects, executed });
-    const names = Array.isArray(executed) ? executed.map(r => (isRecord(r) ? String(r.name) : '')) : [];
-    out.state = state; out.executed = names;
+    const names = Array.isArray(executed) ? executed.flatMap(r => isRecord(r) && typeof r.name === 'string' ? [r.name] : []) : [];
+    out.executed = names;
     out.pending = manifestNames().filter(n => !names.includes(n));
-    return { state, hasMigrations };
+    const history = executed === null && !hasMigrations ? 'none' : evaluateExecuted(executed, manifest);
+    if (history === 'unreadable') throw new SchemaRunnerError('executed_unreadable');
+    if (history === 'diverged') throw new SchemaRunnerError('history_diverged');
+    const applied = history === 'all' ? manifest.length : typeof history === 'object' ? history.applied : 0;
+    const state = classifyState({ relations, foreignObjects, executed }, manifest);
+    out.state = state;
+    out.pending = manifestNames().slice(applied);
+    return { state, hasMigrations, applied };
   }
   const checkMigrationsPrivileges = async () => evaluateMigrationsTablePrivileges(await read('privileges', MIGRATIONS_PRIVILEGES_SQL, [TARGET.app]));
-  const checkApplicationPrivileges = async () => evaluateApplicationPrivileges(await read('privileges', APPLICATION_PRIVILEGES_SQL, [TARGET.app, [...TABLE_ORDER]]));
+  const checkApplicationPrivileges = async (k = manifest.length) => {
+    const tables = tablesOfPrefix(manifest, k);
+    return evaluateApplicationPrivileges(await read('privileges', APPLICATION_PRIVILEGES_SQL, [TARGET.app, tables]), tables);
+  };
+  async function checkStructure(k: number) {
+    if (k === 0) { out.structure = 'unchecked'; out.structureDigest = null; return; }
+    const result = evaluateStructure(await read('structure', STRUCTURE_SQL, [tablesOfPrefix(manifest, k)]), manifest, k);
+    out.structure = result.structure; out.structureDigest = result.structureDigest;
+    must(result.code);
+  }
 
   async function planFlow() {
     await step('begin', () => port.begin('REPEATABLE READ')); txOpen = true;
     must(evaluateIdentity(await read('identity', IDENTITY_SQL, [TARGET.app]), 'plan'));
-    const { state, hasMigrations } = await inspect();
+    const { state, hasMigrations, applied } = await inspect();
     if (hasMigrations) { const v = await checkMigrationsPrivileges(); if (v) out.findings.push(v); }
-    if (state === 'applied') { const v = await checkApplicationPrivileges(); if (v) out.findings.push(v); }
+    if (state === 'applied' || state === 'upgradable') {
+      const v = await checkApplicationPrivileges(applied); if (v) out.findings.push(v);
+      await checkStructure(applied);
+    }
     if (state === 'partial' || state === 'foreign') out.code = state === 'partial' ? 'state_partial' : 'state_foreign';
     else if (out.findings.length > 0) out.code = out.findings[0];
     out.outcome = 'planned';
@@ -183,7 +206,8 @@ export async function runSchema(input: RunInput): Promise<RunResult> {
 
   async function changeFlow() {
     must(evaluateIdentity(await read('identity', IDENTITY_SQL, [TARGET.app]), command));
-    const { state } = await inspect();
+    const before = await inspect();
+    const { state, applied: k } = before;
     const decision = decideAction(command, state);
     if (decision.action === 'refuse') throw new SchemaRunnerError(decision.code as SchemaErrorCode);
     if (decision.action === 'noop') {
@@ -191,26 +215,34 @@ export async function runSchema(input: RunInput): Promise<RunResult> {
       else out.outcome = 'nothing_to_revert';
       return;
     }
+    // Refuse pre-existing drift before opening a write transaction, then verify again under table locks.
+    if (k > 0) await checkStructure(k);
     await step('begin', () => port.begin()); txOpen = true;
+    if (k > 0) await step('lock_tables', () => port.exec(tableLockSql(tablesOfPrefix(manifest, k))));
+    const locked = await inspect();
+    if (locked.applied !== k) throw new SchemaRunnerError('history_diverged');
+    if (locked.state !== state || locked.hasMigrations !== before.hasMigrations) throw new SchemaRunnerError('state_partial');
+    if (k > 0) await checkStructure(k);
     if (command === 'revert') {
-      // The eight tables are locked first (held until COMMIT/ROLLBACK); only then is the state re-read and the emptiness checked.
-      await step('lock_tables', () => port.exec(TABLE_LOCK_SQL));
-      const locked = await inspect();
-      if (locked.state !== 'applied') throw new SchemaRunnerError('state_partial');
-      must(evaluateEmpty(await read('empty', TABLES_EMPTY_SQL)));
+      const removedTables = manifest[k - 1].tables;
+      must(evaluateEmpty(await read('empty', tablesEmptySql(removedTables)), removedTables));
       await step('revert', () => port.revertLast(), Math.max(1, left()));
       must(await checkMigrationsPrivileges());
       const after = await inspect();
-      if (after.state !== 'fresh') throw new SchemaRunnerError('state_partial');
+      if (after.applied !== k - 1) throw new SchemaRunnerError('history_diverged');
+      if (after.state !== (k === 1 ? 'fresh' : 'upgradable')) throw new SchemaRunnerError('state_partial');
+      await checkStructure(k - 1);
     } else {
       const applied = await step('migrate', () => port.applyMigrations(), Math.max(1, left()));
-      if (!sameNames(applied, manifestNames())) throw new SchemaRunnerError('executed_unexpected');
+      if (!sameNames(applied, manifestNames().slice(k))) throw new SchemaRunnerError('executed_unexpected');
       await step('revoke', () => port.exec(REVOKE_MIGRATIONS_TABLE_SQL));
       await step('revoke', () => port.exec(REVOKE_MIGRATIONS_SEQUENCE_SQL));
       must(await checkMigrationsPrivileges());
       must(await checkApplicationPrivileges());
       const after = await inspect();
+      if (after.applied !== manifest.length) throw new SchemaRunnerError('history_diverged');
       if (after.state !== 'applied') throw new SchemaRunnerError('state_partial');
+      await checkStructure(manifest.length);
     }
     // Last point at which a signal can stop the run: from COMMIT on, the outcome is whatever the server decides.
     if (aborted()) throw new Aborted();
@@ -222,6 +254,9 @@ export async function runSchema(input: RunInput): Promise<RunResult> {
   }
 
   try {
+    if (verifyManifest(manifest).length > 0) throw new SchemaRunnerError('manifest_invalid');
+    tablesOfPrefix(manifest, manifest.length);
+    for (let k = 1; k <= manifest.length; k++) derivePrefix(manifest, k);
     await step('connect', () => port.connect(), BUDGET.connectMs);
     lockMaybe = true;
     const verdict = evaluateLock(await read('lock', LOCK_SQL, [LOCK_KEY]));
@@ -232,7 +267,8 @@ export async function runSchema(input: RunInput): Promise<RunResult> {
   } catch (error) {
     const failure = failureOf(error, out.stage);
     out.code = failure.code; out.sqlstate = failure.sqlstate;
-    out.outcome = commitAmbiguous ? 'commit_unconfirmed' : 'failed';
+    out.outcome = commitAmbiguous ? 'commit_unconfirmed' : command === 'plan' ? 'planned' : txOpen ? 'failed' : 'refused';
+    if (command === 'plan') out.findings.push(failure.code);
   }
 
   // Closure: rollback what is open, prove the session is outside any transaction, then (and only then) release the lock.
@@ -260,7 +296,7 @@ export async function runSchema(input: RunInput): Promise<RunResult> {
   const clean = out.code === null && out.closure === 'verified' && out.resources === 'closed';
   const exit = clean ? EXIT.ok : (commitAmbiguous || out.closure === 'unverified' ? EXIT.unconfirmed : EXIT.refused);
   return Object.freeze({
-    command, target: TARGET.database, outcome: out.outcome, ok: exit === 0, code: out.code, sqlstate: out.sqlstate, state: out.state, stage: out.stage,
+    command, target: TARGET.database, outcome: out.outcome, ok: exit === 0, code: out.code, sqlstate: out.sqlstate, state: out.state, stage: out.stage, structure: out.structure, structureDigest: out.structureDigest,
     executed: Object.freeze([...out.executed]), pending: Object.freeze([...out.pending]), findings: Object.freeze([...out.findings]),
     committed: out.committed, transaction: out.transaction, lock: out.lock, closure: out.closure, resources: out.resources, elapsedMs, exit,
   } as RunResult);
@@ -269,7 +305,7 @@ export async function runSchema(input: RunInput): Promise<RunResult> {
 /** A run refused before any connection: arguments, credentials, options. */
 export function refusal(command: SchemaCommand | null, code: RunnerCode, elapsedMs = 0, exit: 2 | 3 = 2): RunResult {
   return Object.freeze({
-    command, target: TARGET.database, outcome: 'refused', ok: false, code, sqlstate: null, state: null, stage: 'start', executed: Object.freeze([]),
+    command, target: TARGET.database, outcome: 'refused', ok: false, code, sqlstate: null, state: null, structure: 'unchecked', structureDigest: null, stage: 'start', executed: Object.freeze([]),
     pending: Object.freeze([]), findings: Object.freeze([]), committed: false, transaction: 'none', lock: 'not_acquired',
     closure: exit === 3 ? 'unverified' : 'verified', resources: exit === 3 ? 'unverified' : 'closed', elapsedMs, exit,
   } as RunResult);
@@ -284,6 +320,8 @@ export function summaryOf(result: RunResult): Record<string, unknown> {
   return {
     command: result.command, target: result.target, outcome: result.outcome, ok: result.ok === true, code: safeCode(result.code),
     sqlstate: result.sqlstate !== null && /^[0-9A-Z]{5}$/.test(result.sqlstate) ? result.sqlstate : null, state: result.state, stage: safe(result.stage),
+    structure: ['verified', 'definitions_unpinned', 'drift', 'unchecked'].includes(result.structure) ? result.structure : 'unchecked',
+    structureDigest: typeof result.structureDigest === 'string' && result.structureDigest.length === 64 && /^[0-9a-f]{64}$/.test(result.structureDigest) ? result.structureDigest : null,
     executed: result.executed.filter(n => SAFE_NAME.test(n)), pending: result.pending.filter(n => SAFE_NAME.test(n)),
     findings: result.findings.filter(c => RUNNER_CODES.includes(c)), committed: result.committed === true, transaction: result.transaction,
     lock: result.lock, closure: result.closure, resources: result.resources, elapsedMs: Number.isFinite(result.elapsedMs) ? result.elapsedMs : 0, exit: result.exit,

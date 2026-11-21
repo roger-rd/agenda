@@ -1,3 +1,5 @@
+import { manifestDigest } from '../schema-runner/schema-guards';
+import { TABLE_ORDER } from './initial-schema.statements';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { QueryRunner } from 'typeorm';
@@ -120,4 +122,12 @@ describe('alcance de esta etapa', () => {
     const present = fs.readdirSync(dir).filter(f => !f.endsWith('.spec.ts')).sort();
     expect(present).toEqual(['1794009600000-initial-schema.ts', '1795219200000-invitations.ts', 'initial-schema.statements.ts', 'invitations.statements.ts', 'schema-manifest.ts']);
   });
+});
+
+it('los metadatos estructurales no alteran las identidades ni el digest del manifiesto real', () => {
+  expect(SCHEMA_MANIFEST).toHaveLength(1);
+  expect(SCHEMA_MANIFEST[0].tables).toBe(TABLE_ORDER);
+  expect(SCHEMA_MANIFEST[0].definitionsDigest).toBeNull();
+  expect(manifestDigest()).toBe('fb855b5be7197bcdb38192243de71402d36fa09df6a5135542195b8151ada11d');
+  expect(manifestDigest([{ ...SCHEMA_MANIFEST[0], tables: ['synthetic'], definitionsDigest: 'a'.repeat(64) }])).toBe(manifestDigest());
 });

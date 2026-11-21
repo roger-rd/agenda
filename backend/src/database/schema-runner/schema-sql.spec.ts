@@ -1,3 +1,6 @@
+import { SCHEMA_MANIFEST, PENDING_MIGRATIONS } from '../migrations/schema-manifest';
+import { tablesOfPrefix } from './schema-guards';
+import { tableLockSql, tablesEmptySql } from './schema-sql';
 import { createHash } from 'node:crypto';
 import { TABLE_ORDER } from '../migrations/initial-schema.statements';
 import {
@@ -10,7 +13,8 @@ const PINNED: Record<string, string> = {
   RELATIONS_SQL: 'cba74027fcb17e417a750485ac44ddfd12665108be2e74fc4010513839a0ccbb',
   FOREIGN_OBJECTS_SQL: 'fdfa2b1173082954659ed7733f99ca94c5d25bbd558b2335102df6aa4e39b19b',
   MIGRATIONS_COLUMNS_SQL: 'de1cae131b2b390855e0c3c22cdc4356c9a86fea44ca9a0ea368e9ec65d30219',
-  EXECUTED_SQL: 'cb15f00ca8b9b2fb12fe9a8628a1ea6ef728cd9ad232a64298c2bfd5cd3f44bc',
+  STRUCTURE_SQL: 'b62456493a9582d32b2d45edb4deb001f3c69049edef63c3d0d549f68370b155',
+  EXECUTED_SQL: '067bac7e7cb4abdc38380f1879c43770bb6189196d1eb55565b0eb24612ed3f1',
   MIGRATIONS_PRIVILEGES_SQL: 'b3d103bb65732edbcd333c8a987bc6accda6d9c377d30f773954dae75d7664e4',
   MIGRATIONS_ACL_SQL: '0c4024aa2bbab0516ea2f577255444c31273d476872f4c9d38e981b81a3730e7',
   APPLICATION_PRIVILEGES_SQL: '2022924dee1bd314c56e380d1a2a06a655afd2440a1eddbebbdfe09a0a8c5b23',
@@ -92,5 +96,30 @@ describe('SQL fijado del runner de esquema', () => {
     for (const text of Object.values(READ_ONLY_QUERIES)) expect(text).not.toContain('agenda_test_app');
     expect(ALL_STATEMENTS.LOCK_SQL).toContain('$1::bigint');
     expect(ALL_STATEMENTS.UNLOCK_SQL).toContain('$1::bigint');
+  });
+});
+
+describe('SQL derivado y permisos limitados', () => {
+  it('prefijo real conserva exactamente bloqueo, vacío y consulta de privilegios', () => {
+    const tables = tablesOfPrefix(SCHEMA_MANIFEST, 1);
+    expect(tableLockSql(tables)).toBe(TABLE_LOCK_SQL);
+    expect(tablesEmptySql(tables)).toBe(TABLES_EMPTY_SQL);
+    expect(sha(APPLICATION_PRIVILEGES_SQL)).toBe('2022924dee1bd314c56e380d1a2a06a655afd2440a1eddbebbdfe09a0a8c5b23');
+  });
+  it.each(['', 'A', '_a', 'a.b', 'a"', 'a; DROP TABLE x', 'a'.repeat(64), 'a b', 'á', 'a\n', 'a\r\n'])('rechaza identificador %j antes de construir SQL', name => {
+    expect(() => tableLockSql([name])).toThrow('manifest_invalid');
+    expect(() => tablesEmptySql([name])).toThrow('manifest_invalid');
+  });
+  it('rechaza listas vacías y duplicadas y conserva el orden permitido', () => {
+    for (const tables of [[], ['a', 'a']]) {
+      expect(() => tableLockSql(tables)).toThrow('manifest_invalid');
+      expect(() => tablesEmptySql(tables)).toThrow('manifest_invalid');
+    }
+    expect(tableLockSql(['b', 'a'])).toBe('LOCK TABLE "public"."b", "public"."a" IN ACCESS EXCLUSIVE MODE');
+  });
+  it('ninguna sentencia del runner ni de ambas migraciones concede permisos ni cambia roles', () => {
+    const statements = [...Object.values(ALL_STATEMENTS), ...[...SCHEMA_MANIFEST, ...PENDING_MIGRATIONS].flatMap(e => [...e.up, ...e.down])];
+    for (const sql of statements) expect(withoutLiterals(sql)).not.toMatch(/\b(?:GRANT|ALTER\s+(?:ROLE|DEFAULT\s+PRIVILEGES)|CREATE\s+ROLE)\b/i);
+    expect(Object.values(WRITE_STATEMENTS)).toEqual([REVOKE_MIGRATIONS_TABLE_SQL, REVOKE_MIGRATIONS_SEQUENCE_SQL]);
   });
 });

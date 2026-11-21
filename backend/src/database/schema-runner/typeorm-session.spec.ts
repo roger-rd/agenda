@@ -1,8 +1,9 @@
-import { DataSource, MigrationExecutor, type QueryRunner } from 'typeorm';
+import { deriveStructure } from './schema-structure';
+import { DataSource, MigrationExecutor, type QueryRunner, type MigrationInterface } from 'typeorm';
 import type { PostgresDataSourceOptions } from 'typeorm/driver/postgres/PostgresDataSourceOptions';
 import { DatabaseConnectionConfig, DatabaseCredentials } from '../../config/database-credentials';
 import { DOWN_STATEMENTS, TABLE_ORDER, UP_STATEMENTS } from '../migrations/initial-schema.statements';
-import { SCHEMA_MANIFEST } from '../migrations/schema-manifest';
+import { SCHEMA_MANIFEST, digestOf, type ManifestEntry } from '../migrations/schema-manifest';
 import { SafeTypeOrmLogger } from '../safe-typeorm-logger';
 import { createSchemaDataSourceOptions } from './schema-data-source';
 import { runSchema, SessionContractError, summaryOf, type RunResult } from './schema-runner';
@@ -36,11 +37,12 @@ function pinned(text: string, world: World, mode: SchemaCommand): unknown[] | un
         { name: 'schema_migrations_id_seq', kind: 'S', table_name: null }] : [])];
     case SQL.FOREIGN_OBJECTS_SQL: return [{ routines: 0, types: 0, extensions: 0 }];
     case SQL.MIGRATIONS_COLUMNS_SQL: return [{ name: 'id', type: 'integer' }, { name: 'timestamp', type: 'bigint' }, { name: 'name', type: 'character varying' }];
-    case SQL.EXECUTED_SQL: return [...world.executed].reverse().map(e => ({ name: e.name }));
+    case SQL.EXECUTED_SQL: return [...world.executed].sort((a, b) => a.id - b.id).map(e => ({ ...e }));
     case SQL.MIGRATIONS_PRIVILEGES_SQL: return [
       ...TABLE_PRIVS.map(privilege => ({ kind: 'table', privilege })), ...['SELECT', 'INSERT', 'UPDATE', 'REFERENCES'].map(privilege => ({ kind: 'column', privilege })),
       ...['USAGE', 'SELECT', 'UPDATE'].map(privilege => ({ kind: 'sequence', privilege }))].map(r => ({ ...r, effective: false, grantable: false }));
     case SQL.APPLICATION_PRIVILEGES_SQL: return [...TABLE_ORDER].flatMap(name => TABLE_PRIVS.map(privilege => ({ name, privilege, effective: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'].includes(privilege), grantable: false })));
+    case SQL.STRUCTURE_SQL: return deriveStructure(SCHEMA_MANIFEST[0].up);
     case SQL.TABLES_EMPTY_SQL: return [Object.fromEntries(TABLE_ORDER.map(t => [t, true]))];
     case SQL.TRANSACTION_CLOSED_SQL: return [{ no_xid: world.tx === 'I', no_backend_xid: world.tx === 'I', implicit_transaction: world.tx === 'I' }];
     case SQL.REVOKE_MIGRATIONS_TABLE_SQL: case SQL.REVOKE_MIGRATIONS_SEQUENCE_SQL: return [];
@@ -53,7 +55,7 @@ function pinned(text: string, world: World, mode: SchemaCommand): unknown[] | un
  * missing: every statement TypeORM itself emits (transactions, hasTable, createTable, the bookkeeping INSERT/DELETE) is
  * produced by the library and recorded here.
  */
-function harness(mode: SchemaCommand, start: Partial<World> = {}, over: { createExecutor?: (ds: DataSource, qr: QueryRunner) => ExecutorLike; failOn?: RegExp } = {}) {
+function harness(mode: SchemaCommand, start: Partial<World> = {}, over: { createExecutor?: (ds: DataSource, qr: QueryRunner) => ExecutorLike; failOn?: RegExp; manifest?: readonly ManifestEntry[] } = {}) {
   const world: World = { migrationsTable: false, tables: false, executed: [], tx: 'I', ...start };
   const log: { text: string; values?: unknown[] }[] = [];
   const texts = () => log.map(l => l.text);
@@ -77,7 +79,7 @@ function harness(mode: SchemaCommand, start: Partial<World> = {}, over: { create
       return rows();
     },
   };
-  const options = createSchemaDataSourceOptions(config, mode, { logger });
+  const options = createSchemaDataSourceOptions(config, mode, { logger }, over.manifest);
   const created: DataSource[] = [];
   let driverRunners = 0;
   const createDataSource = (o: PostgresDataSourceOptions): DataSource => {
@@ -94,7 +96,7 @@ function harness(mode: SchemaCommand, start: Partial<World> = {}, over: { create
   };
   const executors: ExecutorLike[] = [];
   const port = createTypeOrmPort({
-    options, mode, createDataSource,
+    options, mode, createDataSource, manifest: over.manifest,
     createExecutor: over.createExecutor ?? ((ds, qr) => { const e = new MigrationExecutor(ds, qr) as unknown as ExecutorLike; executors.push(e); return e; }),
   });
   return { port, world, log, texts, created, executors, options, runners: () => driverRunners };
@@ -323,8 +325,8 @@ describe('integración: apply y revert completos con el ejecutor real', () => {
 });
 
 describe('L. las sentencias aceptadas coinciden con los contratos de F1.2b-1', () => {
-  it('solo las 15 sentencias fijadas (10 de lectura, 2 de bloqueo advisory, 2 REVOKE y el bloqueo de tablas) son aceptadas', () => {
-    expect(ACCEPTED_STATEMENTS).toHaveLength(15);
+  it('solo las 16 sentencias fijadas (11 de lectura, 2 de bloqueo advisory, 2 REVOKE y el bloqueo de tablas) son aceptadas', () => {
+    expect(ACCEPTED_STATEMENTS).toHaveLength(16);
     expect(new Set(ACCEPTED_STATEMENTS)).toEqual(new Set(Object.entries(SQL.ALL_STATEMENTS).filter(([name]) => !['BEGIN_READ_ONLY_SQL', 'ROLLBACK_SQL'].includes(name)).map(([, sql]) => sql)));
   });
   it('query() acepta lo fijado y reenvía texto y parámetros sin alterarlos', async () => {
@@ -406,5 +408,52 @@ describe('opciones y cierre de recursos', () => {
     await expect(failing.connect()).rejects.toBeDefined();
     await failing.close();
     expect(failing.isClosed()).toBe(true);
+  });
+});
+
+const SYNTHETIC_UP = ['CREATE TABLE "public"."extra" ("id" integer NOT NULL, CONSTRAINT "PK_extra" PRIMARY KEY ("id"))'];
+const SYNTHETIC_DOWN = ['DROP TABLE "public"."extra"'];
+class Extra1800000000000 implements MigrationInterface {
+  async up(qr: QueryRunner) { for (const sql of SYNTHETIC_UP) await qr.query(sql); }
+  async down(qr: QueryRunner) { for (const sql of SYNTHETIC_DOWN) await qr.query(sql); }
+}
+const extended: readonly ManifestEntry[] = [...SCHEMA_MANIFEST, { ...SCHEMA_MANIFEST[0], name: 'Extra1800000000000', timestamp: 1800000000000,
+  migration: Extra1800000000000, up: SYNTHETIC_UP, down: SYNTHETIC_DOWN, sha256: digestOf(SYNTHETIC_UP, SYNTHETIC_DOWN), tables: ['extra'] }];
+
+describe('contrato real de TypeORM con prefijo aplicado', () => {
+  it('ejecuta solo la pendiente y undo revierte solo la última por id, sin transacciones propias', async () => {
+    const h = harness('apply', { migrationsTable: true, tables: true, executed: [{ id: 1, timestamp: SCHEMA_MANIFEST[0].timestamp, name: NAME }] }, { manifest: extended });
+    await h.port.connect(); await h.port.begin();
+    expect(await h.port.applyMigrations()).toEqual(['Extra1800000000000']);
+    expect(h.texts().filter(s => UP_STATEMENTS.includes(s) || SYNTHETIC_UP.includes(s))).toEqual(SYNTHETIC_UP);
+    expect(h.world.executed.map(e => e.name)).toEqual([NAME, 'Extra1800000000000']);
+    const before = h.log.length;
+    await h.port.revertLast();
+    expect(h.texts().slice(before).filter(s => DOWN_STATEMENTS.includes(s) || SYNTHETIC_DOWN.includes(s))).toEqual(SYNTHETIC_DOWN);
+    expect(h.world.executed.map(e => e.name)).toEqual([NAME]);
+    expect(transactional(h.texts())).toEqual(['START TRANSACTION']);
+    expect(h.runners()).toBe(1);
+    await h.port.commit(); await h.port.close();
+  });
+  it('las listas de SQL derivadas admiten solo prefijos y tablas de una entrada del manifiesto inyectado', async () => {
+    const h = harness('revert', {}, { manifest: extended });
+    await h.port.connect();
+    await h.port.exec(SQL.tableLockSql(extended.flatMap(e => [...e.tables])));
+    await h.port.query(SQL.tablesEmptySql(['extra']));
+    await expect(h.port.exec(SQL.tableLockSql(['extra']))).rejects.toBeInstanceOf(SessionContractError);
+    await expect(h.port.query(SQL.tablesEmptySql(['users']))).rejects.toBeInstanceOf(SessionContractError);
+    await h.port.close();
+    expect(() => createTypeOrmPort({ options: h.options, mode: 'revert' })).toThrow('options_unsafe');
+  });
+  it('TypeORM ordena por timestamp y exige sufijo temporal de 13 caracteres y nombres únicos', async () => {
+    const ds = new DataSource({ type: 'postgres', migrations: [Extra1800000000000, SCHEMA_MANIFEST[0].migration] });
+    await (ds as unknown as { buildMetadatas(): Promise<void> }).buildMetadatas();
+    const executor = new MigrationExecutor(ds) as unknown as { getMigrations(): { name: string }[] };
+    expect(executor.getMigrations().map(e => e.name)).toEqual([NAME, 'Extra1800000000000']);
+    ds.migrations.push(new Extra1800000000000());
+    expect(() => executor.getMigrations()).toThrow('Duplicate migrations');
+    ds.migrations.splice(0, ds.migrations.length, { name: 'Bad1', up: async () => undefined, down: async () => undefined });
+    expect(() => executor.getMigrations()).toThrow('JavaScript timestamp');
+    expect(ds.isInitialized).toBe(false);
   });
 });

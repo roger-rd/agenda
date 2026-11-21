@@ -58,7 +58,7 @@ export const ERROR_CODES = Object.freeze([
   'identity_unreadable', 'identity_database', 'identity_user', 'identity_version', 'identity_recovery', 'identity_read_only',
   'standard_conforming_strings_off', 'identity_search_path', 'identity_role_privileged', 'identity_schema_privilege',
   'identity_database_owner', 'identity_event_triggers', 'identity_role_memberships', 'identity_app_role', 'identity_timeouts',
-  'state_unreadable', 'state_truncated', 'state_foreign', 'state_partial',
+  'history_diverged', 'schema_drift', 'state_unreadable', 'state_truncated', 'state_foreign', 'state_partial',
   'lock_unavailable', 'lock_unverified', 'unlock_failed',
   'migrations_table_exposed', 'migrations_privileges_unverified', 'migrations_table_shape',
   'app_privileges_wrong', 'app_privileges_unverified',

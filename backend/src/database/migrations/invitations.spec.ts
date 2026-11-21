@@ -28,6 +28,30 @@ beforeAll(async () => {
   tables = metas.map(m => Table.create(m, source.driver));
 });
 
+/** Nombres de las entidades pendientes y de su registro: solo las excepciones exactas pueden usarlos como identificador. */
+const PENDING_NAMES = /^(?:Invitation|InvitationCompany|INVITATION_ENTITIES)$/;
+const PENDING_FILE = /invitation[^/]*\.entity/;
+/** Archivo (ruta relativa a src) → únicos identificadores permitidos en él. No excluye el archivo del escaneo. */
+const PENDING_EXCEPTIONS: Readonly<Record<string, readonly string[]>> = {
+  'database/schema-runner/schema-structure.spec.ts': ['INVITATION_ENTITIES'],
+};
+/**
+ * Referencias a las entidades pendientes en un archivo. Rechaza identificadores no autorizados y TAMBIÉN cualquier
+ * cadena con esos nombres o con la ruta del archivo de una entidad, de modo que un acceso por texto
+ * (`registro['INVITATION_ENTITIES']`) no esquiva la guarda ni siquiera en el archivo exceptuado.
+ */
+function pendingEntityReferences(relativeFile: string, text: string): string[] {
+  const allowed = PENDING_EXCEPTIONS[relativeFile] ?? [];
+  const found: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isStringLiteralLike(node) && (PENDING_FILE.test(node.text) || PENDING_NAMES.test(node.text))) found.push(`literal:${node.text}`);
+    if (ts.isIdentifier(node) && PENDING_NAMES.test(node.text) && !allowed.includes(node.text)) found.push(`identifier:${node.text}`);
+    ts.forEachChild(node, visit);
+  };
+  visit(ts.createSourceFile(relativeFile, text, ts.ScriptTarget.Latest, true));
+  return found;
+}
+
 function splitTop(body: string): string[] {
   const out: string[] = []; let depth = 0, quote = false, ident = false, start = 0;
   for (let i = 0; i < body.length; i++) {
@@ -180,14 +204,43 @@ describe('invitaciones pendientes: catálogo y metadatos offline', () => {
       return e.isDirectory() ? files(full) : e.name.endsWith('.ts') ? [full] : [];
     });
     for (const file of files(root).filter(f => !/^persistence[/\\]/.test(path.relative(root, f)) && !f.startsWith(__dirname + path.sep))) {
-      const source = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
-      const visit = (node: ts.Node): void => {
-        if (ts.isStringLiteralLike(node)) expect(node.text).not.toMatch(/invitation[^/]*\.entity/);
-        if (ts.isIdentifier(node)) expect(node.text).not.toMatch(/^(?:Invitation|InvitationCompany|INVITATION_ENTITIES)$/);
-        ts.forEachChild(node, visit);
-      };
-      visit(source);
+      const relative = path.relative(root, file).split(path.sep).join('/');
+      expect([relative, pendingEntityReferences(relative, fs.readFileSync(file, 'utf8'))]).toEqual([relative, []]);
     }
+    // Una excepción inexistente o que ya no use el identificador también falla.
+    for (const [relative, names] of Object.entries(PENDING_EXCEPTIONS)) {
+      const text = fs.readFileSync(path.join(root, relative), 'utf8');
+      const used = pendingEntityReferences('database/__sin_excepcion__.ts', text);
+      // Debe aparecer al menos una vez cada nombre exceptuado y ningún otro (importación y uso cuentan por separado).
+      expect([...new Set(used)].sort()).toEqual(names.map(n => `identifier:${n}`).sort());
+    }
+  });
+  describe('límites de la excepción de INVITATION_ENTITIES', () => {
+    const allowedFile = 'database/schema-runner/schema-structure.spec.ts';
+    // Rutas ficticias: la guarda de entities-safety inspecciona toda cadena con la carpeta del registro.
+    const importLine = "import { ENTITIES, INVITATION_ENTITIES } from './registro';\n";
+    it('permite únicamente INVITATION_ENTITIES en el archivo autorizado', () => {
+      expect(pendingEntityReferences(allowedFile, `${importLine}const all = [...ENTITIES, ...INVITATION_ENTITIES];`)).toEqual([]);
+    });
+    it.each(['Invitation', 'InvitationCompany'])('rechaza %s en el archivo autorizado', name => {
+      expect(pendingEntityReferences(allowedFile, `${importLine}const x = ${name};`)).toEqual([`identifier:${name}`]);
+      expect(pendingEntityReferences(allowedFile, `import { ${name} } from './registro';`)).toEqual([`identifier:${name}`]);
+    });
+    it('rechaza la ruta del archivo de una entidad y los accesos por texto, también en el archivo autorizado', () => {
+      expect(pendingEntityReferences(allowedFile, "import { Invitation } from './invitation.entity';").sort()).toEqual(
+        ['identifier:Invitation', 'literal:./invitation.entity']);
+      for (const name of ['INVITATION_ENTITIES', 'Invitation', 'InvitationCompany']) {
+        expect(pendingEntityReferences(allowedFile, `const r = registro['${name}'];`)).toEqual([`literal:${name}`]);
+        expect(pendingEntityReferences(allowedFile, `const r = registro[\`${name}\`];`)).toEqual([`literal:${name}`]);
+      }
+    });
+    it.each([
+      'database/schema-runner/schema-prefix.spec.ts', 'database/schema-runner/schema-structure.ts',
+      'database/schema-runner/schema-structure.spec.tsx', 'database/schema-runner/otro/schema-structure.spec.ts',
+      'companies/companies.module.ts', 'app.module.ts',
+    ])('rechaza INVITATION_ENTITIES fuera del archivo autorizado: %s', file => {
+      expect(pendingEntityReferences(file, `${importLine}const all = [...INVITATION_ENTITIES];`)).toEqual(['identifier:INVITATION_ENTITIES', 'identifier:INVITATION_ENTITIES']);
+    });
   });
 });
 

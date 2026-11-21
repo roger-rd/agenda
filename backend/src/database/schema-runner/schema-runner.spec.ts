@@ -1,3 +1,4 @@
+import { deriveStructure } from './schema-structure';
 import { TABLE_ORDER } from '../migrations/initial-schema.statements';
 import { SCHEMA_MANIFEST } from '../migrations/schema-manifest';
 import { refusal, runSchema, SessionContractError, summaryOf, type RunResult, type SchemaPort, type Timers } from './schema-runner';
@@ -51,13 +52,14 @@ function fakePort(command: SchemaCommand, start: Schema, tweaks: { exposed?: boo
       can_use_public: true, can_create_public: true, owns_database: true, event_triggers: 0, owner_memberships: 0, app_role_exists: true }],
     RELATIONS_SQL: relations, FOREIGN_OBJECTS_SQL: () => [{ routines: 0, types: 0, extensions: 0 }],
     MIGRATIONS_COLUMNS_SQL: () => [{ name: 'id', type: 'integer' }, { name: 'timestamp', type: 'bigint' }, { name: 'name', type: 'character varying' }],
-    EXECUTED_SQL: () => (w.schema === 'applied' ? (tweaks.names ?? [NAME]).map(name => ({ name })) : []),
+    EXECUTED_SQL: () => (w.schema === 'applied' ? (tweaks.names ?? [NAME]).map(name => ({ name, timestamp: SCHEMA_MANIFEST[0].timestamp })) : []),
     MIGRATIONS_PRIVILEGES_SQL: () => [
       ...TABLE_PRIVS.map(privilege => ({ kind: 'table', privilege })), ...['SELECT', 'INSERT', 'UPDATE', 'REFERENCES'].map(privilege => ({ kind: 'column', privilege })),
       ...['USAGE', 'SELECT', 'UPDATE'].map(privilege => ({ kind: 'sequence', privilege })),
     ].map(r => ({ ...r, effective: tweaks.exposed === true && r.kind === 'table' && r.privilege === 'SELECT', grantable: false })),
     APPLICATION_PRIVILEGES_SQL: () => [...TABLE_ORDER].flatMap(name => TABLE_PRIVS.map(privilege => ({
       name, privilege, effective: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'].includes(privilege) !== (tweaks.appWrong === true && privilege === 'TRUNCATE'), grantable: false }))),
+    STRUCTURE_SQL: () => deriveStructure(SCHEMA_MANIFEST[0].up) as unknown as Row[],
     TABLES_EMPTY_SQL: () => [Object.fromEntries(TABLE_ORDER.map(t => [t, tweaks.nonEmpty !== true]))],
     TRANSACTION_CLOSED_SQL: () => [{ no_xid: !w.tx, no_backend_xid: !w.tx, implicit_transaction: !w.tx }],
   };
@@ -121,9 +123,9 @@ async function run(command: SchemaCommand, start: Schema, tweaks: Parameters<typ
 const idx = (events: string[], e: string) => events.indexOf(e);
 const noSecret = (result: RunResult) => { expect(JSON.stringify(result) + JSON.stringify(summaryOf(result))).not.toContain(SECRET); };
 
-const APPLY_SEQUENCE = ['connect', 'q:LOCK_SQL', 'q:IDENTITY_SQL', 'q:RELATIONS_SQL', 'q:FOREIGN_OBJECTS_SQL', 'begin', 'migrate',
+const APPLY_SEQUENCE = ['connect', 'q:LOCK_SQL', 'q:IDENTITY_SQL', 'q:RELATIONS_SQL', 'q:FOREIGN_OBJECTS_SQL', 'begin', 'q:RELATIONS_SQL', 'q:FOREIGN_OBJECTS_SQL', 'migrate',
   'exec:REVOKE_MIGRATIONS_TABLE_SQL', 'exec:REVOKE_MIGRATIONS_SEQUENCE_SQL', 'q:MIGRATIONS_PRIVILEGES_SQL', 'q:APPLICATION_PRIVILEGES_SQL',
-  'q:RELATIONS_SQL', 'q:FOREIGN_OBJECTS_SQL', 'q:MIGRATIONS_COLUMNS_SQL', 'q:EXECUTED_SQL', 'commit', 'q:TRANSACTION_CLOSED_SQL', 'q:UNLOCK_SQL', 'close'];
+  'q:RELATIONS_SQL', 'q:FOREIGN_OBJECTS_SQL', 'q:MIGRATIONS_COLUMNS_SQL', 'q:EXECUTED_SQL', 'q:STRUCTURE_SQL', 'commit', 'q:TRANSACTION_CLOSED_SQL', 'q:UNLOCK_SQL', 'close'];
 
 describe('secuencia exacta', () => {
   it('apply: bloqueo, lectura, BEGIN, migración, REVOKE, verificación, COMMIT, prueba de cierre, desbloqueo y cierre', async () => {
@@ -181,13 +183,13 @@ describe('estado aplicado (idempotencia) y revert', () => {
   });
   it('apply sobre un registro distinto del manifiesto no se considera aplicado', async () => {
     const r = await run('apply', 'applied', { names: ['Other1'] });
-    expect(r.result).toMatchObject({ ok: false, state: 'partial', code: 'state_partial' });
+    expect(r.result).toMatchObject({ ok: false, code: 'history_diverged' });
     expect(r.events.filter(e => /^(migrate|commit)/.test(e))).toEqual([]);
   });
   it('A. revert con tablas vacías: BEGIN, LOCK, revalidación, comprobación de vacío, reversión, verificación, COMMIT', async () => {
     const r = await run('revert', 'applied');
-    expect(r.events).toEqual(['connect', 'q:LOCK_SQL', 'q:IDENTITY_SQL', 'q:RELATIONS_SQL', 'q:FOREIGN_OBJECTS_SQL', 'q:MIGRATIONS_COLUMNS_SQL', 'q:EXECUTED_SQL',
-      'begin', 'exec:TABLE_LOCK_SQL', 'q:RELATIONS_SQL', 'q:FOREIGN_OBJECTS_SQL', 'q:MIGRATIONS_COLUMNS_SQL', 'q:EXECUTED_SQL', 'q:TABLES_EMPTY_SQL', 'revert', 'q:MIGRATIONS_PRIVILEGES_SQL', 'q:RELATIONS_SQL', 'q:FOREIGN_OBJECTS_SQL', 'q:MIGRATIONS_COLUMNS_SQL', 'q:EXECUTED_SQL',
+    expect(r.events).toEqual(['connect', 'q:LOCK_SQL', 'q:IDENTITY_SQL', 'q:RELATIONS_SQL', 'q:FOREIGN_OBJECTS_SQL', 'q:MIGRATIONS_COLUMNS_SQL', 'q:EXECUTED_SQL', 'q:STRUCTURE_SQL',
+      'begin', 'exec:TABLE_LOCK_SQL', 'q:RELATIONS_SQL', 'q:FOREIGN_OBJECTS_SQL', 'q:MIGRATIONS_COLUMNS_SQL', 'q:EXECUTED_SQL', 'q:STRUCTURE_SQL', 'q:TABLES_EMPTY_SQL', 'revert', 'q:MIGRATIONS_PRIVILEGES_SQL', 'q:RELATIONS_SQL', 'q:FOREIGN_OBJECTS_SQL', 'q:MIGRATIONS_COLUMNS_SQL', 'q:EXECUTED_SQL',
       'commit', 'q:TRANSACTION_CLOSED_SQL', 'q:UNLOCK_SQL', 'close']);
     expect(r.result).toMatchObject({ outcome: 'reverted', ok: true, state: 'fresh', exit: 0 });
   });
@@ -205,7 +207,7 @@ describe('estado aplicado (idempotencia) y revert', () => {
     for (const changed of ['partial', 'foreign', 'fresh'] as const) {
       const r = await run('revert', 'applied', {}, f => { f.hooks.TABLE_LOCK_SQL = () => { f.w.schema = changed; }; });
       expect(r.result).toMatchObject({ ok: false, committed: false, transaction: 'rolled_back' });
-      expect(['state_partial', 'state_foreign']).toContain(r.result.code);
+      expect(['state_partial', 'state_foreign', 'history_diverged']).toContain(r.result.code);
       for (const forbidden of ['revert', 'q:TABLES_EMPTY_SQL', 'commit']) expect(r.events).not.toContain(forbidden);
       expect(r.events).toContain('rollback');
     }
@@ -424,7 +426,7 @@ describe('secretos y errores del driver', () => {
     const hostile = { ...base, code: SECRET as never, stage: `${SECRET} x`, executed: [SECRET, 'Good1'], findings: [SECRET as never], extra: SECRET, password: SECRET, sqlstate: SECRET } as unknown as RunResult;
     const summary = summaryOf(hostile);
     expect(JSON.stringify(summary)).not.toContain(SECRET);
-    expect(Object.keys(summary).sort()).toEqual(['code', 'command', 'closure', 'committed', 'elapsedMs', 'executed', 'exit', 'findings', 'lock', 'ok', 'outcome', 'pending', 'resources', 'sqlstate', 'stage', 'state', 'target', 'transaction'].sort());
+    expect(Object.keys(summary).sort()).toEqual(['code', 'command', 'closure', 'committed', 'elapsedMs', 'executed', 'exit', 'findings', 'lock', 'ok', 'outcome', 'pending', 'resources', 'sqlstate', 'stage', 'state', 'structure', 'structureDigest', 'target', 'transaction'].sort());
     expect(summary.executed).toEqual(['Good1']);
     expect(SUMMARY_PREFIX.endsWith(' ')).toBe(true);
   });

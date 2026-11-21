@@ -1,8 +1,10 @@
+import { SCHEMA_MANIFEST, type ManifestEntry } from '../migrations/schema-manifest';
+import { tablesOfPrefix } from './schema-guards';
 import { DataSource, MigrationExecutor, type QueryRunner } from 'typeorm';
 import type { PostgresDataSourceOptions } from 'typeorm/driver/postgres/PostgresDataSourceOptions';
 import { assertSafeSchemaDataSourceOptions } from './schema-data-source';
 import { SessionContractError, type SchemaPort } from './schema-runner';
-import { LOCK_STATEMENTS, READ_ONLY_QUERIES, TABLE_LOCK_STATEMENTS, WRITE_STATEMENTS } from './schema-sql';
+import { LOCK_STATEMENTS, READ_ONLY_QUERIES, TABLES_EMPTY_SQL, tableLockSql, tablesEmptySql, TABLE_LOCK_STATEMENTS, WRITE_STATEMENTS } from './schema-sql';
 import type { SchemaCommand } from './schema-target';
 
 /**
@@ -20,6 +22,7 @@ export interface ExecutorLike {
 }
 
 export interface SessionDeps {
+  readonly manifest?: readonly ManifestEntry[];
   readonly options: PostgresDataSourceOptions;
   readonly mode: SchemaCommand;
   /** Injection point for tests; the default builds the real, still unconnected, DataSource. */
@@ -33,7 +36,15 @@ const WRITABLE: ReadonlySet<string> = new Set([...Object.values(WRITE_STATEMENTS
 const FORBIDDEN_ENTRY_POINTS = ['runMigrations', 'showMigrations', 'undoLastMigration', 'synchronize', 'dropDatabase'] as const;
 
 export function createTypeOrmPort(deps: SessionDeps): SchemaPort {
-  assertSafeSchemaDataSourceOptions(deps.options, deps.mode);
+  const manifest = deps.manifest ?? SCHEMA_MANIFEST;
+  assertSafeSchemaDataSourceOptions(deps.options, deps.mode, manifest);
+  const readable = new Set(READABLE);
+  readable.delete(TABLES_EMPTY_SQL);
+  const writable = new Set(Object.values(WRITE_STATEMENTS));
+  for (let k = 1; k <= manifest.length; k++) {
+    writable.add(tableLockSql(tablesOfPrefix(manifest, k)));
+    readable.add(tablesEmptySql(manifest[k - 1].tables));
+  }
   const makeDataSource = deps.createDataSource ?? ((options: PostgresDataSourceOptions) => new DataSource(options));
   const makeExecutor = deps.createExecutor ?? ((ds: DataSource, qr: QueryRunner): ExecutorLike => new MigrationExecutor(ds, qr) as unknown as ExecutorLike);
   let dataSource: DataSource | undefined;
@@ -58,12 +69,12 @@ export function createTypeOrmPort(deps: SessionDeps): SchemaPort {
     },
 
     async query(sql, params) {
-      if (!READABLE.has(sql)) throw new SessionContractError();
+      if (!readable.has(sql)) throw new SessionContractError();
       return needRunner().query(sql, params === undefined ? undefined : [...params]);
     },
 
     async exec(sql) {
-      if (!WRITABLE.has(sql)) throw new SessionContractError();
+      if (!writable.has(sql)) throw new SessionContractError();
       await needRunner().query(sql);
     },
 

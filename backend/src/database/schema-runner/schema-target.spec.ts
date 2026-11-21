@@ -34,6 +34,8 @@ describe('objetivo fijo del runner de esquema', () => {
   });
 
   it('el error solo lleva un código cerrado', () => {
+    expect(ERROR_CODES).toContain('history_diverged');
+    expect(ERROR_CODES).toContain('schema_drift');
     expect(new Set(ERROR_CODES).size).toBe(ERROR_CODES.length);
     const error = new SchemaRunnerError('options_unsafe');
     expect(error.message).toBe('options_unsafe');

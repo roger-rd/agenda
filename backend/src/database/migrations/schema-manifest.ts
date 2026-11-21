@@ -1,13 +1,16 @@
 import { Invitations1795219200000 } from './1795219200000-invitations';
-import { COUNTS as INVITATION_COUNTS, DOWN_STATEMENTS as INVITATION_DOWN, UP_STATEMENTS as INVITATION_UP } from './invitations.statements';
+import { COUNTS as INVITATION_COUNTS, DOWN_STATEMENTS as INVITATION_DOWN, UP_STATEMENTS as INVITATION_UP, TABLE_ORDER as INVITATION_TABLES } from './invitations.statements';
 import { createHash } from 'node:crypto';
 import type { MigrationInterface } from 'typeorm';
 import { InitialSchema1794009600000 } from './1794009600000-initial-schema';
-import { COUNTS, DOWN_STATEMENTS, UP_STATEMENTS } from './initial-schema.statements';
+import { COUNTS, DOWN_STATEMENTS, UP_STATEMENTS, TABLE_ORDER } from './initial-schema.statements';
 
 export interface ManifestEntry {
   readonly name: string;
   readonly timestamp: number;
+  /** Structural metadata, excluded from both statement and manifest digests. */
+  readonly tables: readonly string[];
+  readonly definitionsDigest: string | null;
   readonly migration: new () => MigrationInterface;
   readonly up: readonly string[];
   readonly down: readonly string[];
@@ -35,6 +38,8 @@ export const SCHEMA_MANIFEST: readonly ManifestEntry[] = Object.freeze([
     down: DOWN_STATEMENTS,
     sha256: '33d0baa69ac1943dd6908af3382456fcecf3048ccd0ba282a466a32aa958f0ab',
     counts: COUNTS,
+    tables: TABLE_ORDER,
+    definitionsDigest: null,
     downScope: 'development-and-test-only',
     immutable: true,
   } as const),
@@ -44,9 +49,17 @@ export const SCHEMA_MANIFEST: readonly ManifestEntry[] = Object.freeze([
 export function verifyManifest(entries: readonly ManifestEntry[] = SCHEMA_MANIFEST): readonly string[] {
   const problems: string[] = [];
   const names = new Set<string>();
+  const tables = new Set<string>();
+  if (entries.length === 0 || entries.length > 200) problems.push('invalid manifest length');
   let previous = 0;
   for (const entry of entries) {
     const prefix = entry.name;
+    if (!Array.isArray(entry.tables) || entry.tables.length === 0) problems.push(`${prefix}: invalid tables`);
+    else for (const table of entry.tables) {
+      if (typeof table !== 'string' || table !== table.trim() || !/^[a-z][a-z0-9_]{0,62}$/.test(table) || table === 'schema_migrations' || table === 'schema_migrations_id_seq' || tables.has(table)) problems.push(`${prefix}: invalid or duplicate table`);
+      tables.add(table);
+    }
+    if (entry.definitionsDigest !== null && (typeof entry.definitionsDigest !== 'string' || entry.definitionsDigest.length !== 64 || !/^[0-9a-f]{64}$/.test(entry.definitionsDigest))) problems.push(`${prefix}: invalid definitions digest`);
     if (names.has(entry.name)) problems.push(`${prefix}: duplicate name`);
     names.add(entry.name);
     if (!new RegExp(`^[A-Za-z]+${entry.timestamp}$`).test(entry.name)) problems.push(`${prefix}: name does not end with its timestamp`);
@@ -70,6 +83,8 @@ export const PENDING_MIGRATIONS: readonly ManifestEntry[] = Object.freeze([
     down: INVITATION_DOWN,
     sha256: 'e2c0f8061c469fcd8ae73b7145d321c0f4c1d0fb46e7d1c12d34bbd47a48f11f',
     counts: INVITATION_COUNTS,
+    tables: INVITATION_TABLES,
+    definitionsDigest: null,
     downScope: 'development-and-test-only',
     immutable: true,
   } as const),

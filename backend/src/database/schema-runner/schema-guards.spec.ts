@@ -93,7 +93,7 @@ describe('identidad de la sesión', () => {
   it.each([[undefined], [null], [[]], [[1]], [identity('apply').concat(identity('apply'))], ['x']])('filas ilegibles %j', rows => { expect(evaluateIdentity(rows, 'apply')).toBe('identity_unreadable'); });
 });
 
-const executedRows = (names: string[]) => names.map(name => ({ name }));
+const executedRows = (names: string[]) => names.map(name => ({ name, timestamp: SCHEMA_MANIFEST[0].timestamp }));
 const manifestNames = SCHEMA_MANIFEST.map(e => e.name);
 const relations = (over: { tables?: string[]; extra?: Row[]; migrations?: boolean; sequence?: boolean } = {}): Row[] => [
   ...(over.tables ?? tables).map(name => ({ name, kind: 'r', table_name: null })),
@@ -145,8 +145,8 @@ describe('clasificación del estado del esquema', () => {
   it('evaluateExecuted distingue nada, todo y lo inesperado', () => {
     expect(evaluateExecuted([])).toBe('none');
     expect(evaluateExecuted(executedRows(manifestNames))).toBe('all');
-    expect(evaluateExecuted(executedRows(['Other1']))).toBe('unexpected');
-    expect(evaluateExecuted(executedRows([...manifestNames, 'Extra2']))).toBe('unexpected');
+    expect(evaluateExecuted(executedRows(['Other1']))).toBe('diverged');
+    expect(evaluateExecuted(executedRows([...manifestNames, 'Extra2']))).toBe('diverged');
     expect(evaluateExecuted([{ name: 5 }])).toBe('unreadable');
     expect(evaluateExecuted(null)).toBe('unreadable');
   });

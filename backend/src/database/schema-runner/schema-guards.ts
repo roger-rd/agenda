@@ -88,7 +88,7 @@ export function evaluateIdentity(input: unknown, mode: SchemaCommand): Verdict {
 
 /* ----------------------------- schema state ----------------------------- */
 
-export type SchemaState = 'fresh' | 'applied' | 'partial' | 'foreign';
+export type SchemaState = 'fresh' | 'applied' | 'upgradable' | 'partial' | 'foreign';
 export type Action = 'proceed' | 'noop' | 'refuse';
 
 export interface StateSnapshot {
@@ -101,18 +101,37 @@ export interface StateSnapshot {
 const RELATION_CAP = 200;
 const countOf = (row: Row | undefined, key: string): number | null => (row && typeof row[key] === 'number' && Number.isSafeInteger(row[key]) && (row[key] as number) >= 0 ? (row[key] as number) : null);
 
-/** The `executed` rows against the manifest: none, exactly the manifest in order, or anything else. */
-export function evaluateExecuted(input: unknown, manifest: readonly ManifestEntry[] = SCHEMA_MANIFEST): 'none' | 'all' | 'unexpected' | 'unreadable' {
+export type ExecutedState = 'none' | { readonly kind: 'prefix'; readonly applied: number } | 'all' | 'diverged' | 'unreadable';
+
+/** PostgreSQL bigint travels as decimal text; no coercion of other values is allowed. */
+export function evaluateExecuted(input: unknown, manifest: readonly ManifestEntry[] = SCHEMA_MANIFEST): ExecutedState {
   const rows = rowsOf(input);
   if (rows === null || rows.some(r => typeof r.name !== 'string')) return 'unreadable';
   if (rows.length === 0) return 'none';
-  const names = rows.map(r => r.name as string);
-  return names.length === manifest.length && names.every((n, i) => n === manifest[i].name) ? 'all' : 'unexpected';
+  if (rows.length > manifest.length || rows.some((r, i) => r.name !== manifest[i].name ||
+    !(r.timestamp === manifest[i].timestamp || r.timestamp === String(manifest[i].timestamp)))) return 'diverged';
+  return rows.length === manifest.length ? 'all' : { kind: 'prefix', applied: rows.length };
+}
+
+/** Deterministic creation order, with no silently discarded duplicates. */
+export function tablesOfPrefix(manifest: readonly ManifestEntry[], k: number): readonly string[] {
+  if (!Number.isInteger(k) || k < 0 || k > manifest.length) throw new SchemaRunnerError('manifest_invalid');
+  const tables: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of manifest) {
+    if (!Array.isArray(entry.tables)) throw new SchemaRunnerError('manifest_invalid');
+    for (const table of entry.tables) {
+      if (typeof table !== 'string' || table !== table.trim() || !/^[a-z][a-z0-9_]{0,62}$/.test(table) || seen.has(table)) throw new SchemaRunnerError('manifest_invalid');
+      seen.add(table);
+    }
+  }
+  for (const entry of manifest.slice(0, k)) tables.push(...entry.tables);
+  return Object.freeze(tables);
 }
 
 /**
  * fresh: nothing of ours exists (the migrations table alone may exist, empty).
- * applied: the 8 tables, the migrations table and its sequence, with exactly the manifest recorded.
+ * applied/upgradable: exactly the accumulated prefix tables, migration table and sequence, with that prefix recorded.
  * partial: ours, but incomplete or inconsistent. foreign: anything that is not ours, which is never touched.
  */
 export function classifyState(snapshot: StateSnapshot, manifest: readonly ManifestEntry[] = SCHEMA_MANIFEST): SchemaState {
@@ -124,7 +143,7 @@ export function classifyState(snapshot: StateSnapshot, manifest: readonly Manife
   if (routines === null || types === null || extensions === null) throw new SchemaRunnerError('state_unreadable');
   if (routines + types + extensions > 0) return 'foreign';
 
-  const tables = new Set<string>(TABLE_ORDER);
+  const tables = new Set<string>(tablesOfPrefix(manifest, manifest.length));
   const ours = new Set<string>([...tables, MIGRATIONS_TABLE]);
   const present = { tables: new Set<string>(), migrations: false, sequence: false };
   for (const rel of relations) {
@@ -136,10 +155,13 @@ export function classifyState(snapshot: StateSnapshot, manifest: readonly Manife
     else return 'foreign';
   }
   const executed = present.migrations ? evaluateExecuted(snapshot.executed, manifest) : (snapshot.executed === null ? 'none' : 'unreadable');
+  if (executed === 'diverged') throw new SchemaRunnerError('history_diverged');
   if (executed === 'unreadable') throw new SchemaRunnerError('executed_unreadable');
   if (present.tables.size === 0 && !present.sequence && executed === 'none') return 'fresh';
   if (present.tables.size === 0 && present.migrations && present.sequence && executed === 'none') return 'fresh';
-  if (present.tables.size === tables.size && present.migrations && present.sequence && executed === 'all') return 'applied';
+  const k = executed === 'all' ? manifest.length : typeof executed === 'object' ? executed.applied : 0;
+  const expected = tablesOfPrefix(manifest, k);
+  if (k > 0 && present.tables.size === expected.length && expected.every(t => present.tables.has(t)) && present.migrations && present.sequence) return k === manifest.length ? 'applied' : 'upgradable';
   return 'partial';
 }
 
@@ -148,8 +170,8 @@ export function decideAction(command: SchemaCommand, state: SchemaState): { acti
   if (state === 'foreign') return { action: 'refuse', code: 'state_foreign' };
   if (command === 'plan') return { action: 'proceed', code: null };
   if (state === 'partial') return { action: 'refuse', code: 'state_partial' };
-  if (command === 'apply') return state === 'fresh' ? { action: 'proceed', code: null } : { action: 'noop', code: null };
-  return state === 'applied' ? { action: 'proceed', code: null } : { action: 'noop', code: null };
+  if (command === 'apply') return state === 'fresh' || state === 'upgradable' ? { action: 'proceed', code: null } : { action: 'noop', code: null };
+  return state === 'applied' || state === 'upgradable' ? { action: 'proceed', code: null } : { action: 'noop', code: null };
 }
 
 /** The recorded migrations table must have exactly the columns TypeORM creates. */

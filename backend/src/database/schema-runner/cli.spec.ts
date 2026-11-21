@@ -139,7 +139,7 @@ describe('línea de órdenes del runner de esquema', () => {
         const d = deps(args('plan'), { openPort: open }); await runCli(d.base); Object.keys(summary(d.lines)).forEach(k => keys.add(k));
       }
       const refused = deps([]); await runCli(refused.base); Object.keys(summary(refused.lines)).forEach(k => keys.add(k));
-      expect([...keys].sort()).toEqual(['closure', 'code', 'command', 'committed', 'elapsedMs', 'executed', 'exit', 'findings', 'lock', 'ok', 'outcome', 'pending', 'resources', 'sqlstate', 'stage', 'state', 'target', 'transaction']);
+      expect([...keys].sort()).toEqual(['closure', 'code', 'command', 'committed', 'elapsedMs', 'executed', 'exit', 'findings', 'lock', 'ok', 'outcome', 'pending', 'resources', 'sqlstate', 'stage', 'state', 'structure', 'structureDigest', 'target', 'transaction']);
     });
   });
 

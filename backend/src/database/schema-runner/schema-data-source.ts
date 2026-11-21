@@ -1,7 +1,7 @@
 import type { Logger } from 'typeorm';
 import type { PostgresDataSourceOptions } from 'typeorm/driver/postgres/PostgresDataSourceOptions';
 import type { DatabaseConnectionConfig } from '../../config/database-credentials';
-import { SCHEMA_MANIFEST } from '../migrations/schema-manifest';
+import { SCHEMA_MANIFEST, verifyManifest, type ManifestEntry } from '../migrations/schema-manifest';
 import { assertOwnerTarget } from './credential-file';
 import { APPLICATION_NAME, BUDGET, MIGRATIONS_TABLE, SchemaRunnerError, TARGET, type SchemaCommand } from './schema-target';
 
@@ -18,7 +18,7 @@ const ALLOWED_KEYS: readonly string[] = Object.freeze([
   'migrationsTransactionMode', 'synchronize', 'dropSchema', 'migrationsRun', 'installExtensions', 'ssl', 'logging', 'logger', 'extra',
 ]);
 
-export function createSchemaDataSourceOptions(config: DatabaseConnectionConfig, mode: SchemaCommand, extras: { logger: Logger }): PostgresDataSourceOptions {
+export function createSchemaDataSourceOptions(config: DatabaseConnectionConfig, mode: SchemaCommand, extras: { logger: Logger }, manifest: readonly ManifestEntry[] = SCHEMA_MANIFEST): PostgresDataSourceOptions {
   assertOwnerTarget(config);
   const options: PostgresDataSourceOptions = {
     type: 'postgres', host: config.host, port: config.port, database: config.name, username: config.credentials.user,
@@ -26,7 +26,7 @@ export function createSchemaDataSourceOptions(config: DatabaseConnectionConfig, 
     password: config.credentials.revealPassword(),
     schema: TARGET.schema,
     entities: [],
-    migrations: SCHEMA_MANIFEST.map(entry => entry.migration),
+    migrations: manifest.map(entry => entry.migration),
     migrationsTableName: MIGRATIONS_TABLE,
     migrationsTransactionMode: 'all',
     synchronize: false, dropSchema: false, migrationsRun: false, installExtensions: false,
@@ -39,15 +39,16 @@ export function createSchemaDataSourceOptions(config: DatabaseConnectionConfig, 
       idle_in_transaction_session_timeout: BUDGET.idleInTransactionMs, options: readOnlyOption(mode),
     },
   };
-  assertSafeSchemaDataSourceOptions(options, mode);
+  assertSafeSchemaDataSourceOptions(options, mode, manifest);
   return options;
 }
 
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 
 /** Refuses anything that is not exactly the options built above. Throws a code, never the options. */
-export function assertSafeSchemaDataSourceOptions(options: PostgresDataSourceOptions, mode: SchemaCommand): void {
+export function assertSafeSchemaDataSourceOptions(options: PostgresDataSourceOptions, mode: SchemaCommand, manifest: readonly ManifestEntry[] = SCHEMA_MANIFEST): void {
   const bad = (): never => { throw new SchemaRunnerError('options_unsafe'); };
+  if (verifyManifest(manifest).length > 0) bad();
   if (options === null || typeof options !== 'object') bad();
   if (Object.keys(options).some(k => !ALLOWED_KEYS.includes(k))) bad();
   const extra = options.extra as Record<string, unknown> | undefined;
@@ -57,7 +58,7 @@ export function assertSafeSchemaDataSourceOptions(options: PostgresDataSourceOpt
   if (typeof options.password !== 'string' || options.password.length === 0) bad();
   if (!Array.isArray(options.entities) || options.entities.length !== 0) bad();
   const migrations = options.migrations;
-  if (!Array.isArray(migrations) || migrations.length !== SCHEMA_MANIFEST.length || !SCHEMA_MANIFEST.every((e, i) => migrations[i] === e.migration)) bad();
+  if (!Array.isArray(migrations) || migrations.length !== manifest.length || !manifest.every((e, i) => migrations[i] === e.migration)) bad();
   if (options.migrationsTableName !== MIGRATIONS_TABLE || options.migrationsTransactionMode !== 'all') bad();
   if (options.synchronize !== false || options.dropSchema !== false || options.migrationsRun !== false || options.installExtensions !== false) bad();
   if (options.ssl !== false || !same(options.logging, ['error'])) bad();

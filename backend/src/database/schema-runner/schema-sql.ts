@@ -1,9 +1,9 @@
 import { TABLE_ORDER } from '../migrations/initial-schema.statements';
-import { MIGRATIONS_SEQUENCE, MIGRATIONS_TABLE, TARGET } from './schema-target';
+import { MIGRATIONS_SEQUENCE, MIGRATIONS_TABLE, SchemaRunnerError, TARGET } from './schema-target';
 
 /**
- * Every statement the runner may send of its own, as constant text. Nothing here is executed by this module and none is
- * built from input: roles and table names travel as parameters, identifiers that are fixed are written literally.
+ * Read-only queries and control statements have constant text. Roles and table lists travel as parameters.
+ * Lock and emptiness statements are derived only from validated manifest identifiers; no SQL is executed here.
  * Queries are separate from the evaluators in schema-guards.ts, which only look at rows. The pinned digests in the spec
  * make any edit deliberate.
  */
@@ -59,7 +59,7 @@ WHERE a.attrelid = to_regclass('"public"."schema_migrations"') AND a.attnum > 0 
 ORDER BY a.attnum`;
 
 /** Migrations already recorded. Only valid when the migrations table exists. */
-export const EXECUTED_SQL = `SELECT name::text AS name FROM "public"."schema_migrations" ORDER BY id LIMIT 201`;
+export const EXECUTED_SQL = `SELECT id, timestamp, name::text AS name FROM "public"."schema_migrations" ORDER BY id LIMIT 201`;
 
 /**
  * Effective privileges of the application role over the migrations table and its sequence, inheritance and PUBLIC
@@ -100,15 +100,64 @@ CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REF
 ORDER BY t.name, p.privilege`;
 
 /** One boolean per business table: true when it has no rows. Built once from the frozen table list. */
-export const TABLES_EMPTY_SQL = `SELECT ${TABLE_ORDER.map(t => `NOT EXISTS (SELECT 1 FROM "public"."${t}") AS "${t}"`).join(', ')}`;
+export const tablesEmptySql = (tables: readonly string[]): string => `SELECT ${validatedTables(tables).map(t => `NOT EXISTS (SELECT 1 FROM "public"."${t}") AS "${t}"`).join(', ')}`;
 
 /**
- * Revert only. Taken right after BEGIN, before the emptiness check, and held until COMMIT or ROLLBACK: it stops every
- * other session (cooperative or not) from writing to, or reading, the eight tables while they are checked and dropped.
+ * Existing prefix tables. Taken right after BEGIN, before the emptiness check, and held until COMMIT or ROLLBACK: it stops every
+ * other session (cooperative or not) from writing to, or reading, the prefix tables while they are verified and migrated.
  * ACCESS EXCLUSIVE from the start, so the later DROP TABLE never has to upgrade a weaker lock. Same fixed order as the
- * migration; $-free, built only from the frozen table list. lock_timeout (5 s) makes it fail instead of waiting.
+ * migration; $-free, built only from validated manifest identifiers. lock_timeout (5 s) makes it fail instead of waiting.
  */
-export const TABLE_LOCK_SQL = `LOCK TABLE ${TABLE_ORDER.map(t => `"${TARGET.schema}"."${t}"`).join(', ')} IN ACCESS EXCLUSIVE MODE`;
+export const tableLockSql = (tables: readonly string[]): string => `LOCK TABLE ${validatedTables(tables).map(t => `"${TARGET.schema}"."${t}"`).join(', ')} IN ACCESS EXCLUSIVE MODE`;
+
+/** Only manifest identifiers can enter identifier positions; values remain bound parameters. */
+function validatedTables(tables: readonly string[]): readonly string[] {
+  if (!Array.isArray(tables) || tables.length === 0 || new Set(tables).size !== tables.length ||
+    tables.some(t => typeof t !== 'string' || t !== t.trim() || !/^[a-z][a-z0-9_]{0,62}$/.test(t))) throw new SchemaRunnerError('manifest_invalid');
+  return tables;
+}
+export const TABLES_EMPTY_SQL = tablesEmptySql(TABLE_ORDER);
+export const TABLE_LOCK_SQL = tableLockSql(TABLE_ORDER);
+
+/** $1 = accumulated prefix tables. 2001 is a sentinel: more than 2000 rows fails closed. */
+export const STRUCTURE_SQL = `SELECT 'col'::text AS kind, t.relname::text AS table_name, a.attname::text AS name,
+  format_type(a.atttypid, a.atttypmod) AS type, a.attnotnull AS not_null,
+  pg_get_expr(d.adbin, d.adrelid) AS default_expression,
+  NULL::text[] AS columns, NULL::text AS ref_table, NULL::text[] AS ref_columns,
+  NULL::text AS on_delete, NULL::text AS on_update, NULL::boolean AS is_unique,
+  NULL::text AS definition, NULL::text AS predicate
+FROM pg_catalog.pg_class t
+JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid
+LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid = t.oid AND d.adnum = a.attnum
+WHERE n.nspname = 'public' AND t.relname = ANY($1::text[]) AND a.attnum > 0 AND NOT a.attisdropped
+UNION ALL
+SELECT 'con', t.relname::text, c.conname::text, c.contype::text, NULL::boolean, NULL::text,
+  ARRAY(SELECT a.attname::text FROM unnest(c.conkey) WITH ORDINALITY k(num, ord)
+    JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.num ORDER BY k.ord),
+  CASE WHEN c.confrelid = 0 THEN NULL ELSE rn.nspname::text || '.' || rt.relname::text END,
+  ARRAY(SELECT a.attname::text FROM unnest(c.confkey) WITH ORDINALITY k(num, ord)
+    JOIN pg_catalog.pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.num ORDER BY k.ord),
+  c.confdeltype::text, c.confupdtype::text, NULL::boolean, pg_get_constraintdef(c.oid, true), NULL::text
+FROM pg_catalog.pg_constraint c
+JOIN pg_catalog.pg_class t ON t.oid = c.conrelid
+JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+LEFT JOIN pg_catalog.pg_class rt ON rt.oid = c.confrelid
+LEFT JOIN pg_catalog.pg_namespace rn ON rn.oid = rt.relnamespace
+WHERE n.nspname = 'public' AND t.relname = ANY($1::text[])
+UNION ALL
+SELECT 'idx', t.relname::text, x.relname::text, NULL::text, NULL::boolean, NULL::text,
+  ARRAY(SELECT a.attname::text FROM unnest(i.indkey) WITH ORDINALITY k(num, ord)
+    LEFT JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.num ORDER BY k.ord),
+  NULL::text, NULL::text[], NULL::text, NULL::text, i.indisunique,
+  pg_get_indexdef(i.indexrelid, 0, true), pg_get_expr(i.indpred, i.indrelid)
+FROM pg_catalog.pg_index i
+JOIN pg_catalog.pg_class t ON t.oid = i.indrelid
+JOIN pg_catalog.pg_class x ON x.oid = i.indexrelid
+JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+WHERE n.nspname = 'public' AND t.relname = ANY($1::text[])
+ORDER BY kind, table_name, name
+LIMIT 2001`;
 
 export const LOCK_SQL = 'SELECT pg_try_advisory_lock($1::bigint) AS locked';
 export const UNLOCK_SQL = 'SELECT pg_advisory_unlock($1::bigint) AS unlocked';
@@ -133,7 +182,7 @@ export const REVOKE_MIGRATIONS_TABLE_SQL = `REVOKE ALL ON TABLE "${TARGET.schema
 export const REVOKE_MIGRATIONS_SEQUENCE_SQL = `REVOKE ALL ON SEQUENCE "${TARGET.schema}"."${MIGRATIONS_SEQUENCE}" FROM "${TARGET.app}"`;
 
 export const READ_ONLY_QUERIES = Object.freeze({
-  IDENTITY_SQL, RELATIONS_SQL, FOREIGN_OBJECTS_SQL, MIGRATIONS_COLUMNS_SQL, EXECUTED_SQL, MIGRATIONS_PRIVILEGES_SQL,
+  IDENTITY_SQL, RELATIONS_SQL, FOREIGN_OBJECTS_SQL, MIGRATIONS_COLUMNS_SQL, EXECUTED_SQL, STRUCTURE_SQL, MIGRATIONS_PRIVILEGES_SQL,
   MIGRATIONS_ACL_SQL, APPLICATION_PRIVILEGES_SQL, TABLES_EMPTY_SQL, TRANSACTION_CLOSED_SQL,
 });
 export const LOCK_STATEMENTS = Object.freeze({ LOCK_SQL, UNLOCK_SQL });

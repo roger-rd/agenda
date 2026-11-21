@@ -55,8 +55,8 @@ describe('módulos del ejecutor de esquema (F1.2b-2)', () => {
 
   it('la sesión solo envía texto fijado: nada de sentencias literales fuera de schema-sql.ts', () => {
     for (const f of NEW) expect([f, /['"`]\s*(?:SELECT|REVOKE|GRANT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|BEGIN|COMMIT|ROLLBACK|START)\s+\S/.test(code(f))]).toEqual([f, false]);
-    expect(code('typeorm-session.ts')).toMatch(/READABLE\.has\(sql\)/);
-    expect(code('typeorm-session.ts')).toMatch(/WRITABLE\.has\(sql\)/);
+    expect(code('typeorm-session.ts')).toMatch(/readable\.has\(sql\)/);
+    expect(code('typeorm-session.ts')).toMatch(/writable\.has\(sql\)/);
   });
 
   it('el ejecutor orquesta sin importar la sesión ni el DataSource, y el resumen se construye campo a campo', () => {
