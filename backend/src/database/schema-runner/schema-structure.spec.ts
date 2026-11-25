@@ -1,13 +1,14 @@
 import { DataSource, type EntityMetadata } from 'typeorm';
 import { ENTITIES, INVITATION_ENTITIES } from '../../persistence/entities';
-import { SCHEMA_MANIFEST } from '../migrations/schema-manifest';
+import { SCHEMA_MANIFEST, type ManifestEntry } from '../migrations/schema-manifest';
 import { UP_STATEMENTS as INITIAL } from '../migrations/initial-schema.statements';
 import { UP_STATEMENTS as SECOND } from '../migrations/invitations.statements';
-import { OBSERVED_INITIAL_DEFINITIONS } from './testing/observed-initial-definitions';
+import { OBSERVED_INITIAL_DEFINITIONS, RECONSTRUCTED_INVITATION_DEFINITIONS, withObservedDefinitions } from './testing/observed-initial-definitions';
 import { definitionLines, footprintOf, deriveStructure, derivePrefix, shapeLines, definitionsDigest, evaluateStructure, normalizeExpression, diffStructure, projectDriftLine, type DriftLine, type StructureRow } from './schema-structure';
 
 // Solo las pruebas inspeccionan metadatos; las entidades de invitaciones siguen fuera del registro activo.
-const combined = SCHEMA_MANIFEST;
+/** Real manifest without its pins: the shape/definitions tests decide pins themselves (the real pins are covered in their own describe). */
+const combined: ManifestEntry[] = SCHEMA_MANIFEST.map(e => ({ ...e, definitionsDigest: null }));
 let source: DataSource;
 beforeAll(async () => {
   source = new DataSource({ type: 'postgres', schema: 'public', entities: [...ENTITIES, ...INVITATION_ENTITIES], synchronize: false });
@@ -378,6 +379,8 @@ describe('normalización de operadores de patrón y literales', () => {
 
 describe('definiciones observadas en agenda_test para el esquema inicial (offline)', () => {
   const OBSERVED_DIGEST = '2264ec9a2899ced9beb0e24280bd5d3a260e46016d9f6e5450076f5089985c94';
+  // Digest observado en agenda_test tras aplicar invitaciones (prefijo 2).
+  const OBSERVED_DIGEST_2 = '66741a61b78e6f262643c87fb19de20b2d56a45a3645965f7f1fabb1b8ed1556';
   const key = (r: StructureRow) => (r.kind === 'con' && r.type === 'c' ? `check:${r.table_name}:${r.name}` : r.kind === 'idx' && r.predicate !== null ? `predicate:${r.table_name}:${r.name}` : null);
   const observed = () => {
     const rows = deriveStructure(INITIAL);
@@ -397,18 +400,49 @@ describe('definiciones observadas en agenda_test para el esquema inicial (offlin
   it('el digest de la estructura con esas definiciones es el observado en la base', () => {
     expect(definitionsDigest(observed())).toBe(OBSERVED_DIGEST);
   });
-  it('el manifiesto fija ese digest solo en la migración inicial; invitaciones sigue sin pin', () => {
-    expect(SCHEMA_MANIFEST.map(e => e.definitionsDigest)).toEqual([OBSERVED_DIGEST, null]);
+  it('el manifiesto fija el digest de cada prefijo observado, con los sha256 sin cambios', () => {
+    expect(SCHEMA_MANIFEST.map(e => e.definitionsDigest)).toEqual([OBSERVED_DIGEST, OBSERVED_DIGEST_2]);
     expect(definitionsDigest(observed())).toBe(SCHEMA_MANIFEST[0].definitionsDigest);
     expect(SCHEMA_MANIFEST.map(e => e.sha256.slice(0, 8))).toEqual(['33d0baa6', 'e2c0f806']);
   });
-  it('con el pin, la estructura observada del prefijo 1 queda verified y una definición alterada es deriva; el prefijo 2 sigue sin pin', () => {
+  it('con el pin, la estructura observada del prefijo 1 queda verified y una definición alterada es deriva', () => {
     expect(evaluateStructure(observed(), SCHEMA_MANIFEST, 1)).toMatchObject({ structure: 'verified', structureDigest: OBSERVED_DIGEST, code: null });
     const rows = observed(); const r = rows.find(x => x.name === 'CK_users_password_hash')!;
     r.definition = r.definition!.replace('>= 40', '>= 41');
     expect(evaluateStructure(rows, SCHEMA_MANIFEST, 1)).toMatchObject({ structure: 'drift', code: 'schema_drift' });
     expect(diffStructure(rows, SCHEMA_MANIFEST, 1).lines).toEqual([{ category: 'definitions', expected: OBSERVED_DIGEST, observed: definitionsDigest(rows) }]);
-    expect(evaluateStructure(deriveStructure([...INITIAL, ...SECOND]), SCHEMA_MANIFEST, 2)).toMatchObject({ structure: 'definitions_unpinned', code: null });
+  });
+  // Las 8 definiciones de invitaciones se reconstruyeron desde los statements y se contrastaron con el digest observado del prefijo 2;
+  // no se recibieron sus líneas originales. Que el digest coincida exactamente es la prueba de que el texto es el mismo.
+  describe('prefijo 2: 37 observadas + 8 reconstruidas, contrastadas con el digest observado', () => {
+    const prefix2 = () => withObservedDefinitions(deriveStructure([...INITIAL, ...SECOND]));
+    it('hay 45 definiciones: 40 CHECK y 5 predicados; las 8 nuevas están todas cubiertas', () => {
+      const keys = deriveStructure([...INITIAL, ...SECOND]).map(key).filter((k): k is string => k !== null);
+      expect(keys.filter(k => k.startsWith('check:'))).toHaveLength(40);
+      expect(keys.filter(k => k.startsWith('predicate:'))).toHaveLength(5);
+      expect(Object.keys(RECONSTRUCTED_INVITATION_DEFINITIONS).sort()).toEqual(keys.filter(k => k.includes(':invitations:')).sort());
+      expect(Object.keys(RECONSTRUCTED_INVITATION_DEFINITIONS)).toHaveLength(8);
+      expect(definitionLines(prefix2()).definitions).toHaveLength(45);
+    });
+    it('el digest con esas 45 definiciones es el observado en agenda_test', () => {
+      expect(definitionsDigest(prefix2())).toBe(OBSERVED_DIGEST_2);
+    });
+    it('las 37 del prefijo inicial permanecen iguales: no se pisan y su digest sigue siendo el del pin inicial', () => {
+      expect(Object.keys(OBSERVED_INITIAL_DEFINITIONS).filter(k => k in RECONSTRUCTED_INVITATION_DEFINITIONS)).toEqual([]);
+      expect(definitionsDigest(withObservedDefinitions(deriveStructure(INITIAL)))).toBe(OBSERVED_DIGEST);
+    });
+    it('con ambos pins, el prefijo 2 observado queda verified; cualquier definición nueva alterada es deriva con dos digests', () => {
+      expect(evaluateStructure(prefix2(), SCHEMA_MANIFEST, 2)).toMatchObject({ structure: 'verified', structureDigest: OBSERVED_DIGEST_2, code: null });
+      for (const name of Object.keys(RECONSTRUCTED_INVITATION_DEFINITIONS).map(k => k.split(':')[2])) {
+        const rows = prefix2(); const r = rows.find(x => x.name === name)!;
+        if (r.kind === 'con') r.definition = r.definition!.replace('CHECK (', 'CHECK ( true AND'); else r.predicate = `${r.predicate!} AND true`;
+        expect(evaluateStructure(rows, SCHEMA_MANIFEST, 2)).toMatchObject({ structure: 'drift', code: 'schema_drift' });
+        expect(diffStructure(rows, SCHEMA_MANIFEST, 2).lines).toEqual([{ category: 'definitions', expected: OBSERVED_DIGEST_2, observed: definitionsDigest(rows) }]);
+      }
+    });
+    it('sin pin, la misma estructura sigue siendo definitions_unpinned', () => {
+      expect(evaluateStructure(prefix2(), combined, 2)).toMatchObject({ structure: 'definitions_unpinned', structureDigest: OBSERVED_DIGEST_2, code: null });
+    });
   });
   it('cualquier alteración de una definición observada cambia el digest', () => {
     for (const mutate of [(d: string) => d.replace('~~', '~'), (d: string) => d.replace("'$argon2id$%'", () => "'$argon2id$'"), (d: string) => d.replace('>= 40', '>= 41')]) {
@@ -416,5 +450,14 @@ describe('definiciones observadas en agenda_test para el esquema inicial (offlin
       r.definition = mutate(r.definition!);
       expect(definitionsDigest(rows)).not.toBe(OBSERVED_DIGEST);
     }
+  });
+});
+
+describe('etapa también cuando el diff falla por dentro (con pin y definición ilegible)', () => {
+  it('con el pin real del prefijo 2, una definición que no se puede normalizar indica la etapa definitions', () => {
+    const rows = withObservedDefinitions(deriveStructure([...INITIAL, ...SECOND]));
+    rows.find(r => r.name === 'CK_invitations_role')!.definition = 'CHECK (role @ 1)';
+    expect(evaluateStructure(rows, SCHEMA_MANIFEST, 2)).toMatchObject({ structure: 'drift', code: 'schema_drift' });
+    expect(diffStructure(rows, SCHEMA_MANIFEST, 2)).toEqual({ lines: [{ category: 'unknown', stage: 'definitions' }], omitted: 0 });
   });
 });

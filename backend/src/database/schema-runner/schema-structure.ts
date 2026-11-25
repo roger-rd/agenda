@@ -284,7 +284,7 @@ export function diffStructure(input: unknown, manifest: readonly ManifestEntry[]
       const observed = definitionsDigest(input as StructureRow[]);
       if (observed !== pin) lines.push({ category: 'definitions', expected: pin, observed });
     }
-  } catch { return minimal('unknown'); }
+  } catch { return minimal('unknown', stageOf(input, manifest, k)); }
   // The evaluation failed but the per-row comparison found nothing: say which stage of the evaluation failed.
   if (!lines.length) return minimal('unknown', stageOf(input, manifest, k));
   // Anomalies first, so the 50-line cap can never hide an unreadable or duplicated row behind many missing ones.

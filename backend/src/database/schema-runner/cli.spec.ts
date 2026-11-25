@@ -191,7 +191,7 @@ describe('línea de órdenes del runner de esquema', () => {
 
 describe('contrato de salida de definiciones y ruta compilada', () => {
   it.each([1, 2] as const)('stdout exacto para prefijo %i y catálogo en cualquier orden', async prefix => {
-    // Prefijo 1: el catálogo trae las definiciones tal como las imprime PostgreSQL y el pin del manifiesto las verifica; prefijo 2 sigue sin pin.
+    // Ambos prefijos: el catálogo trae las definiciones tal como las imprime PostgreSQL y el pin del manifiesto las verifica.
     const rows = withObservedDefinitions(derivePrefix(SCHEMA_MANIFEST, prefix));
     const digest = definitionsDigest(rows);
     const lines = rows.flatMap(r => r.kind === 'con' && r.type === 'c' ? [{ kind: 'check', table: r.table_name, name: r.name, definition: normalizeExpression(r.definition!) }] :
@@ -199,7 +199,7 @@ describe('contrato de salida de definiciones y ruta compilada', () => {
       .sort((a, b) => { for (const key of ['kind', 'table', 'name'] as const) { if (a[key] < b[key]) return -1; if (a[key] > b[key]) return 1; } return 0; });
     const expected = [SUMMARY_PREFIX + JSON.stringify({
       command: 'plan', target: 'agenda_test', outcome: 'planned', ok: true, code: null, sqlstate: null,
-      state: prefix === 2 ? 'applied' : 'upgradable', stage: 'structure', structure: prefix === 1 ? 'verified' : 'definitions_unpinned', structureDigest: digest,
+      state: prefix === 2 ? 'applied' : 'upgradable', stage: 'structure', structure: 'verified', structureDigest: digest,
       executed: SCHEMA_MANIFEST.slice(0, prefix).map(e => e.name), pending: SCHEMA_MANIFEST.slice(prefix).map(e => e.name), findings: [],
       committed: false, transaction: 'rolled_back', lock: 'released', closure: 'verified', resources: 'closed', elapsedMs: 0, exit: 0,
     }) + '\n', ...lines.map(line => DEFINITIONS_PREFIX + JSON.stringify(line) + '\n'),
@@ -219,7 +219,8 @@ describe('contrato de salida de definiciones y ruta compilada', () => {
     const d = deps([...args('plan'), '--show-definitions'], { openPort: () => f.port });
     await runCli(d.base);
     const result = summary(d.lines);
-    if (mode === 'omitidas') expect(result.definitionsOmitted).toBe(true);
+    // El prefijo 2 está fijado: una definición distinta ya no pasa como «sin pin», es deriva y no se imprime ninguna definición.
+    if (mode === 'omitidas') expect(result).toMatchObject({ structure: 'drift', code: 'schema_drift' });
     expect(d.lines.join('')).not.toContain(DEFINITIONS_PREFIX);
     expect(d.lines.join('')).not.toContain('á');
   });
@@ -290,12 +291,14 @@ describe('plan --show-drift: salida controlada', () => {
     expect(d.lines.join('')).not.toContain(DEFINITIONS_PREFIX);
   });
   it('solo difiere el texto de una definición: dos digests y ninguna expresión', async () => {
-    const rows = derivePrefix(SCHEMA_MANIFEST, 2); rows.find(r => r.type === 'c')!.definition = "CHECK ('secreto-7Q' = 'secreto-7Q')";
-    // Con un manifiesto sin pin no se puede afirmar nada: el plan informa definiciones sin pin y no hay diagnóstico.
+    const rows = withObservedDefinitions(derivePrefix(SCHEMA_MANIFEST, 2)); rows.find(r => r.type === 'c')!.definition = "CHECK ('secreto-7Q' = 'secreto-7Q')";
     const f = planPort({ prefix: 2, structure: rows });
     const d = deps([...args('plan'), '--show-drift'], { openPort: () => f.port });
-    expect(await runCli(d.base)).toBe(0);
-    expect(d.lines).toHaveLength(1);
+    expect(await runCli(d.base)).toBe(2);
+    const drift = driftLines(d.lines);
+    expect(drift).toHaveLength(2);
+    expect(drift[0]).toEqual({ category: 'definitions', expected: SCHEMA_MANIFEST[1].definitionsDigest, observed: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    expect(drift[1]).toEqual({ count: 1, omitted: 0 });
     expect(d.lines.join('')).not.toContain('secreto-7Q');
   });
   it('estructura ilegible o con más de 2000 filas: una línea de categoría y el cierre, sin contenido', async () => {
@@ -329,13 +332,13 @@ describe('plan --show-drift: salida controlada', () => {
 
 describe('plan --show-drift con columnas de un CHECK en otro orden', () => {
   it('termina bien y sin líneas de deriva, como una estructura equivalente', async () => {
-    const rows = derivePrefix(SCHEMA_MANIFEST, 2);
+    const rows = withObservedDefinitions(derivePrefix(SCHEMA_MANIFEST, 2));
     const check = rows.find(r => r.name === 'CK_user_sessions_times')!;
     check.columns = ['expires_at', 'created_at', 'last_seen_at', 'revoked_at'];
     const f = planPort({ prefix: 2, structure: rows });
     const d = deps([...args('plan'), '--show-drift', '--show-definitions'], { openPort: () => f.port });
     expect(await runCli(d.base)).toBe(0);
-    expect(JSON.parse(d.lines[0].slice(SUMMARY_PREFIX.length))).toMatchObject({ structure: 'definitions_unpinned', code: null });
+    expect(JSON.parse(d.lines[0].slice(SUMMARY_PREFIX.length))).toMatchObject({ structure: 'verified', code: null });
     expect(d.lines.join('')).not.toContain(DRIFT_PREFIX);
     expect(d.lines.some(l => l.startsWith(DEFINITIONS_PREFIX))).toBe(true);
   });
@@ -343,17 +346,16 @@ describe('plan --show-drift con columnas de un CHECK en otro orden', () => {
 
 describe('plan --show-drift con la forma real de PostgreSQL (orden observado y ARRAY[...])', () => {
   const realistic = () => {
-    const rows = derivePrefix(SCHEMA_MANIFEST, 2);
+    // Las definiciones ya vienen como las imprime PostgreSQL (ARRAY[...], ::text, ~~); solo se altera el orden de las columnas.
+    const rows = withObservedDefinitions(derivePrefix(SCHEMA_MANIFEST, 2));
     rows.find(r => r.name === 'CK_user_sessions_times')!.columns = ['expires_at', 'created_at', 'last_seen_at', 'revoked_at'];
-    rows.find(r => r.name === 'CK_organization_memberships_role')!.definition =
-      "CHECK (role::text = ANY (ARRAY['community_manager'::character varying, 'worker'::character varying, 'client'::character varying]::text[]))";
     return rows;
   };
-  it('flujo completo con ambas opciones: sin deriva, definiciones impresas', async () => {
+  it('flujo completo con ambas opciones: sin deriva, verified con el pin y definiciones impresas', async () => {
     const f = planPort({ prefix: 2, structure: realistic() });
     const d = deps([...args('plan'), '--show-drift', '--show-definitions'], { openPort: () => f.port });
     expect(await runCli(d.base)).toBe(0);
-    expect(JSON.parse(d.lines[0].slice(SUMMARY_PREFIX.length))).toMatchObject({ structure: 'definitions_unpinned', code: null });
+    expect(JSON.parse(d.lines[0].slice(SUMMARY_PREFIX.length))).toMatchObject({ structure: 'verified', structureDigest: SCHEMA_MANIFEST[1].definitionsDigest, code: null });
     expect(d.lines.join('')).not.toContain(DRIFT_PREFIX);
     expect(d.lines.some(l => l.startsWith(DEFINITIONS_PREFIX))).toBe(true);
   });

@@ -131,6 +131,6 @@ it('los metadatos estructurales no alteran las identidades ni el digest del mani
   expect(SCHEMA_MANIFEST[0].definitionsDigest).toBe('2264ec9a2899ced9beb0e24280bd5d3a260e46016d9f6e5450076f5089985c94');
   expect(manifestDigest()).toBe(createHash('sha256').update(JSON.stringify(SCHEMA_MANIFEST.map(e => [e.name, e.sha256]))).digest('hex'));
   expect(manifestDigest(SCHEMA_MANIFEST.slice(0, 1))).toBe('fb855b5be7197bcdb38192243de71402d36fa09df6a5135542195b8151ada11d');
-  expect(SCHEMA_MANIFEST.map(e => e.definitionsDigest)).toEqual(['2264ec9a2899ced9beb0e24280bd5d3a260e46016d9f6e5450076f5089985c94', null]);
+  expect(SCHEMA_MANIFEST.map(e => e.definitionsDigest)).toEqual(['2264ec9a2899ced9beb0e24280bd5d3a260e46016d9f6e5450076f5089985c94', '66741a61b78e6f262643c87fb19de20b2d56a45a3645965f7f1fabb1b8ed1556']);
   expect(manifestDigest([{ ...SCHEMA_MANIFEST[0], tables: ['synthetic'], definitionsDigest: 'a'.repeat(64) }, SCHEMA_MANIFEST[1]])).toBe(manifestDigest());
 });

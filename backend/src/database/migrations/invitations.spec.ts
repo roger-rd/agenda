@@ -173,7 +173,7 @@ describe('invitaciones pendientes: catálogo y metadatos offline', () => {
     expect(SCHEMA_MANIFEST[1].up).toBe(UP_STATEMENTS);
     expect(SCHEMA_MANIFEST[1].down).toBe(DOWN_STATEMENTS);
     expect(SCHEMA_MANIFEST[1].tables).toBe(TABLE_ORDER);
-    expect(SCHEMA_MANIFEST[1].definitionsDigest).toBeNull();
+    expect(SCHEMA_MANIFEST[1].definitionsDigest).toBe('66741a61b78e6f262643c87fb19de20b2d56a45a3645965f7f1fabb1b8ed1556');
     expect(Object.isFrozen(SCHEMA_MANIFEST)).toBe(true);
     expect(Object.isFrozen(SCHEMA_MANIFEST[1])).toBe(true);
     expect(SCHEMA_MANIFEST[1]).toMatchObject({ name: 'Invitations1795219200000', timestamp: 1795219200000,

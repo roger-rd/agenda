@@ -1,8 +1,15 @@
 import type { StructureRow } from '../schema-structure';
 
 /**
- * Normalized definitions observed on agenda_test for the initial schema (read-only `plan --show-definitions`), used only offline to
- * check the pin. kind:table:name -> normalized text. Keys are sorted as the runner prints them.
+ * OBSERVED_INITIAL_DEFINITIONS: the 37 normalized definitions of the initial schema as printed by a read-only
+ * `plan --show-definitions` on agenda_test (33 CHECK + 4 predicates). kind:table:name -> normalized text.
+ *
+ * RECONSTRUCTED_INVITATION_DEFINITIONS: the 8 definitions of the invitations migration (7 CHECK + 1 predicate). Their text was NOT
+ * received from the database: it was reconstructed from the frozen statements applying the same PostgreSQL printing rules seen in
+ * the 37 observed ones, and then confirmed through the observed structure digest of prefix 2 (66741a61...), which the reconstruction
+ * reproduces exactly. The digest proves the text matches; it does not replace having read the original lines.
+ *
+ * Used only offline, so simulated catalogs return PostgreSQL's canonical text.
  */
 const ID_V7 = "CHECK ( substr ( id :: text , 15 , 1 ) = '7' :: text AND ( substr ( id :: text , 20 , 1 ) = ANY ( ARRAY [ '8' :: text , '9' :: text , 'a' :: text , 'b' :: text ] ) ) )";
 const NAME = "CHECK ( char_length ( name :: text ) >= 2 AND char_length ( name :: text ) <= 80 AND name :: text = btrim ( name :: text ) AND name :: text !~ '  ' :: text AND name :: text !~ '[[:cntrl:]]' :: text )";
@@ -51,14 +58,27 @@ export const OBSERVED_INITIAL_DEFINITIONS: Readonly<Record<string, string>> = {
   'predicate:posts:IX_posts_responsible': '( deleted_at IS NULL )',
 };
 
+export const RECONSTRUCTED_INVITATION_DEFINITIONS: Readonly<Record<string, string>> = {
+  'check:invitations:CK_invitations_acceptance_pair': 'CHECK ( ( accepted_at IS NULL ) = ( accepted_by_user_id IS NULL ) )',
+  'check:invitations:CK_invitations_email': OBSERVED_INITIAL_DEFINITIONS['check:users:CK_users_email'],
+  'check:invitations:CK_invitations_id_v7': ID_V7,
+  'check:invitations:CK_invitations_role': enumOf('role', ['worker', 'client']),
+  'check:invitations:CK_invitations_state': 'CHECK ( NOT ( accepted_at IS NOT NULL AND revoked_at IS NOT NULL ) )',
+  'check:invitations:CK_invitations_times': 'CHECK ( expires_at > created_at AND ( revoked_at IS NULL OR revoked_at >= created_at ) AND ( accepted_at IS NULL OR accepted_at >= created_at AND accepted_at < expires_at ) )',
+  'check:invitations:CK_invitations_token_hash': 'CHECK ( octet_length ( token_hash ) = 32 )',
+  'predicate:invitations:UQ_invitations_open_email': '( ( accepted_at IS NULL ) AND ( revoked_at IS NULL ) )',
+};
+
+const ALL_DEFINITIONS: Readonly<Record<string, string>> = { ...OBSERVED_INITIAL_DEFINITIONS, ...RECONSTRUCTED_INVITATION_DEFINITIONS };
+
 const keyOf = (r: StructureRow): string | null =>
   r.kind === 'con' && r.type === 'c' ? `check:${r.table_name}:${r.name}` : r.kind === 'idx' && r.predicate !== null ? `predicate:${r.table_name}:${r.name}` : null;
 
-/** What a PostgreSQL catalog returns for the initial schema: the frozen shape with the definitions as PostgreSQL prints them. */
+/** What a PostgreSQL catalog returns: the frozen shape with the definitions of both migrations as PostgreSQL prints them. */
 export function withObservedDefinitions<T extends StructureRow>(rows: readonly T[]): T[] {
   return rows.map(r => {
     const k = keyOf(r);
-    if (k === null || !(k in OBSERVED_INITIAL_DEFINITIONS)) return { ...r };
-    return r.kind === 'con' ? { ...r, definition: OBSERVED_INITIAL_DEFINITIONS[k] } : { ...r, predicate: OBSERVED_INITIAL_DEFINITIONS[k] };
+    if (k === null || !(k in ALL_DEFINITIONS)) return { ...r };
+    return r.kind === 'con' ? { ...r, definition: ALL_DEFINITIONS[k] } : { ...r, predicate: ALL_DEFINITIONS[k] };
   });
 }

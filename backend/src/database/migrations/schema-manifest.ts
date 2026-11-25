@@ -52,7 +52,7 @@ export const SCHEMA_MANIFEST: readonly ManifestEntry[] = Object.freeze([
     sha256: 'e2c0f8061c469fcd8ae73b7145d321c0f4c1d0fb46e7d1c12d34bbd47a48f11f',
     counts: INVITATION_COUNTS,
     tables: INVITATION_TABLES,
-    definitionsDigest: null,
+    definitionsDigest: '66741a61b78e6f262643c87fb19de20b2d56a45a3645965f7f1fabb1b8ed1556',
     downScope: 'development-and-test-only',
     immutable: true,
   } as const),
