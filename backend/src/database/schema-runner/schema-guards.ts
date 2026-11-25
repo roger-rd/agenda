@@ -19,16 +19,21 @@ const rowsOf = (value: unknown): Row[] | null => (Array.isArray(value) && value.
 
 /* ----------------------------- arguments and confirmation ----------------------------- */
 
-export interface ParsedArguments { readonly command: SchemaCommand; readonly confirm: string; readonly showDefinitions: boolean }
+export interface ParsedArguments { readonly command: SchemaCommand; readonly confirm: string; readonly showDefinitions: boolean; readonly showDrift: boolean }
 
-/** Opciones exactas; --show-definitions es opcional, sin valor y exclusivo de plan. */
+/** Opciones exactas; --show-definitions y --show-drift son opcionales, sin valor y exclusivas de plan. */
 export function parseArguments(argv: readonly string[]): ParsedArguments {
   if (!Array.isArray(argv) || argv.some(a => typeof a !== 'string')) throw new SchemaRunnerError('args_invalid');
   const [command, ...flags] = argv;
   if (!(COMMANDS as readonly string[]).includes(command)) throw new SchemaRunnerError('args_invalid');
   const found: Record<'env' | 'target' | 'confirm', string[]> = { env: [], target: [], confirm: [] };
   let showDefinitions = false;
+  let showDrift = false;
   for (const flag of flags) {
+    if (flag === '--show-drift') {
+      if (command !== 'plan' || showDrift) throw new SchemaRunnerError('args_invalid');
+      showDrift = true; continue;
+    }
     if (flag === '--show-definitions') {
       if (command !== 'plan' || showDefinitions) throw new SchemaRunnerError('args_invalid');
       showDefinitions = true; continue;
@@ -41,7 +46,7 @@ export function parseArguments(argv: readonly string[]): ParsedArguments {
   if (found.env[0] === 'production' || found.env[0] === 'development') throw new SchemaRunnerError('env_forbidden');
   if (found.env[0] !== TARGET.env) throw new SchemaRunnerError('args_invalid');
   if (found.target[0] !== TARGET.database) throw new SchemaRunnerError('target_invalid');
-  return Object.freeze({ command: command as SchemaCommand, confirm: found.confirm[0], showDefinitions });
+  return Object.freeze({ command: command as SchemaCommand, confirm: found.confirm[0], showDefinitions, showDrift });
 }
 
 /** Digest of what the manifest is: names and pinned digests, in order. */

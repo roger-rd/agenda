@@ -128,9 +128,9 @@ describe('alcance de esta etapa', () => {
 it('los metadatos estructurales no alteran las identidades ni el digest del manifiesto real', () => {
   expect(SCHEMA_MANIFEST).toHaveLength(2);
   expect(SCHEMA_MANIFEST[0].tables).toBe(TABLE_ORDER);
-  expect(SCHEMA_MANIFEST[0].definitionsDigest).toBeNull();
+  expect(SCHEMA_MANIFEST[0].definitionsDigest).toBe('2264ec9a2899ced9beb0e24280bd5d3a260e46016d9f6e5450076f5089985c94');
   expect(manifestDigest()).toBe(createHash('sha256').update(JSON.stringify(SCHEMA_MANIFEST.map(e => [e.name, e.sha256]))).digest('hex'));
   expect(manifestDigest(SCHEMA_MANIFEST.slice(0, 1))).toBe('fb855b5be7197bcdb38192243de71402d36fa09df6a5135542195b8151ada11d');
-  expect(SCHEMA_MANIFEST.map(e => e.definitionsDigest)).toEqual([null, null]);
+  expect(SCHEMA_MANIFEST.map(e => e.definitionsDigest)).toEqual(['2264ec9a2899ced9beb0e24280bd5d3a260e46016d9f6e5450076f5089985c94', null]);
   expect(manifestDigest([{ ...SCHEMA_MANIFEST[0], tables: ['synthetic'], definitionsDigest: 'a'.repeat(64) }, SCHEMA_MANIFEST[1]])).toBe(manifestDigest());
 });

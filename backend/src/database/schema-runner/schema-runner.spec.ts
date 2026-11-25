@@ -1,3 +1,4 @@
+import { withObservedDefinitions } from './testing/observed-initial-definitions';
 import { deriveStructure } from './schema-structure';
 import { TABLE_ORDER } from '../migrations/initial-schema.statements';
 import { SCHEMA_MANIFEST } from '../migrations/schema-manifest';
@@ -62,7 +63,7 @@ function fakePort(command: SchemaCommand, start: Schema, tweaks: { exposed?: boo
     ].map(r => ({ ...r, effective: tweaks.exposed === true && r.kind === 'table' && r.privilege === 'SELECT', grantable: false })),
     APPLICATION_PRIVILEGES_SQL: () => ALL_TABLES.flatMap(name => TABLE_PRIVS.map(privilege => ({
       name, privilege, effective: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'].includes(privilege) !== (tweaks.appWrong === true && privilege === 'TRUNCATE'), grantable: false }))),
-    STRUCTURE_SQL: () => deriveStructure(SCHEMA_MANIFEST.slice(0, w.schema === 'upgradable' ? 1 : 2).flatMap(e => [...e.up])) as unknown as Row[],
+    STRUCTURE_SQL: () => withObservedDefinitions(deriveStructure(SCHEMA_MANIFEST.slice(0, w.schema === 'upgradable' ? 1 : 2).flatMap(e => [...e.up]))) as unknown as Row[],
     TABLES_EMPTY_SQL: () => [Object.fromEntries(SCHEMA_MANIFEST[1].tables.map(t => [t, tweaks.nonEmpty !== true]))],
     TRANSACTION_CLOSED_SQL: () => [{ no_xid: !w.tx, no_backend_xid: !w.tx, implicit_transaction: !w.tx }],
   };

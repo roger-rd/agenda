@@ -15,10 +15,10 @@ export interface StructureRow {
 function invalid(): never { throw new SchemaRunnerError('manifest_invalid'); }
 const identifier = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/;
 
-/** Token normalization preserves quoted identifiers and literal bytes, including significant whitespace. */
+/** Token normalization keeps `~~`, `~~*`, `!~~` and `!~~*` (LIKE, ILIKE, NOT LIKE, NOT ILIKE as PostgreSQL prints them) as single tokens, distinct from `~ ~`. It preserves quoted identifiers and literal bytes, including significant whitespace. */
 export function normalizeExpression(text: string): string {
   if (/--|\/\*|\*\//.test(text.replace(/'(?:[^']|'')*'|"(?:[^"]|"")*"/g, ''))) invalid();
-  const tokens = text.match(/'(?:[^']|'')*'|"(?:[^"]|"")*"|::|>=|<=|<>|!=|!~\*?|~\*?|[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[(),.=<>+*/%~-]/g) ?? [];
+  const tokens = text.match(/'(?:[^']|'')*'|"(?:[^"]|"")*"|::|>=|<=|<>|!=|!~~\*?|~~\*?|!~\*?|~\*?|[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[()[\],.=<>+*/%~-]/g) ?? [];
   if (tokens.join('') !== text.replace(/'(?:[^']|'')*'|"(?:[^"]|"")*"|\s+/g, s => /^\s+$/.test(s) ? '' : s)) invalid();
   return tokens.join(' ');
 }
@@ -41,7 +41,11 @@ function splitClauses(body: string): string[] {
 const columnList = (text: string): string[] => splitClauses(text).map(c => {
   const m = /^"([a-z][a-z0-9_]{0,62})"$/.exec(c); return m ? m[1] : invalid();
 });
-/** CHECK conkey is a set of referenced attributes in physical column order in PostgreSQL. */
+/**
+ * Columns referenced by a CHECK, as a set. PostgreSQL gives the order of a CHECK's conkey no positional meaning (on agenda_test it
+ * follows the first appearance in the expression, not the physical order), so shapeLines compares CHECK columns sorted.
+ * Primary keys, uniques, foreign keys and indexes keep their strict order, where it is part of the definition.
+ */
 export function checkColumns(expression: string, columns: readonly string[]): string[] {
   const tokens = normalizeExpression(expression).match(/'(?:[^']|'')*'|"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_]*/g) ?? [];
   const names = new Set(tokens.filter(t => !t.startsWith("'")).map(t => t.replace(/^"|"$/g, '')));
@@ -89,7 +93,7 @@ export function deriveStructure(statements: readonly string[]): StructureRow[] {
 /** JSON tuples avoid delimiter collisions; sorted lines make catalogue row order irrelevant. */
 export function shapeLines(rows: readonly StructureRow[]): string[] {
   return rows.map(r => JSON.stringify(r.kind === 'col' ? ['col', r.table_name, r.name, r.type, r.not_null, r.default_expression === null ? null : normalizeExpression(r.default_expression!)] :
-    r.kind === 'con' ? ['con', r.table_name, r.name, r.type, r.columns, r.ref_table, r.ref_columns, r.on_delete, r.on_update] :
+    r.kind === 'con' ? ['con', r.table_name, r.name, r.type, r.type === 'c' ? [...r.columns!].sort() : r.columns, r.ref_table, r.ref_columns, r.on_delete, r.on_update] :
       ['idx', r.name, r.table_name, r.is_unique, r.columns, r.predicate !== null])).sort();
 }
 export function definitionsDigest(rows: readonly StructureRow[]): string {
@@ -120,20 +124,33 @@ export function derivePrefix(manifest: readonly ManifestEntry[], k: number): Str
   return rows;
 }
 
-export function evaluateStructure(input: unknown, manifest: readonly ManifestEntry[], k: number): { structure: StructureStatus; structureDigest: string | null; code: SchemaErrorCode | null } {
-  const fail = (code: SchemaErrorCode = 'schema_drift') => ({ structure: 'drift' as const, structureDigest: null, code });
-  if (!Array.isArray(input)) return fail();
-  if (input.length > 2000) return fail('state_truncated');
-  if (!input.every(readable)) return fail();
-  if (new Set(input.map(r => JSON.stringify([r.kind, r.table_name, r.name]))).size !== input.length) return fail();
+export type EvaluationStage = 'input' | 'size' | 'rows' | 'duplicates' | 'shape' | 'definitions' | 'pin' | 'passed';
+const EVALUATION_STAGES: readonly EvaluationStage[] = ['input', 'size', 'rows', 'duplicates', 'shape', 'definitions', 'pin', 'passed'];
+
+/** Single source of truth: evaluateStructure and diffStructure both go through it, so the failing stage is always known. */
+function inspectStructure(input: unknown, manifest: readonly ManifestEntry[], k: number):
+  { structure: StructureStatus; structureDigest: string | null; code: SchemaErrorCode | null; stage: EvaluationStage } {
+  const fail = (stage: EvaluationStage, code: SchemaErrorCode = 'schema_drift') => ({ structure: 'drift' as const, structureDigest: null, code, stage });
+  if (!Array.isArray(input)) return fail('input');
+  if (input.length > 2000) return fail('size', 'state_truncated');
+  if (!input.every(readable)) return fail('rows');
+  if (new Set(input.map(r => JSON.stringify([r.kind, r.table_name, r.name]))).size !== input.length) return fail('duplicates');
   const expected = derivePrefix(manifest, k);
+  let stage: EvaluationStage = 'shape';
   try {
-    if (JSON.stringify(shapeLines(input)) !== JSON.stringify(shapeLines(expected))) return fail();
+    if (JSON.stringify(shapeLines(input)) !== JSON.stringify(shapeLines(expected))) return fail('shape');
+    stage = 'definitions';
     const digest = definitionsDigest(input);
+    stage = 'pin';
     const pin = manifest[k - 1]?.definitionsDigest;
-    if (pin !== null && pin !== digest) return fail();
-    return { structure: pin === null ? 'definitions_unpinned' : 'verified', structureDigest: digest, code: null };
-  } catch { return fail(); }
+    if (pin !== null && pin !== digest) return fail('pin');
+    return { structure: pin === null ? 'definitions_unpinned' : 'verified', structureDigest: digest, code: null, stage: 'passed' };
+  } catch { return fail(stage); }
+}
+
+export function evaluateStructure(input: unknown, manifest: readonly ManifestEntry[], k: number): { structure: StructureStatus; structureDigest: string | null; code: SchemaErrorCode | null } {
+  const { structure, structureDigest, code } = inspectStructure(input, manifest, k);
+  return { structure, structureDigest, code };
 }
 
 /** Huella de catálogo: incluye los índices de respaldo de PK y UNIQUE. */
@@ -166,4 +183,118 @@ export function definitionLines(rows: readonly StructureRow[]): { definitions: r
     return 0;
   });
   return { definitions: Object.freeze(definitions), definitionsOmitted: false };
+}
+
+/** 'definitions': the shape matches but the text of a CHECK or of a partial-index predicate differs from the pinned digest. */
+export type DriftCategory = 'missing' | 'unexpected' | 'changed' | 'definitions' | 'unreadable' | 'duplicate' | 'unknown';
+const DRIFT_CATEGORIES: readonly DriftCategory[] = ['missing', 'unexpected', 'changed', 'definitions', 'unreadable', 'duplicate', 'unknown'];
+const DRIFT_RANK: Readonly<Record<DriftCategory, number>> = { unreadable: 0, duplicate: 1, unknown: 2, definitions: 3, changed: 4, unexpected: 5, missing: 6 };
+const hexDigest = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+type DriftValue = string | boolean | null | readonly string[];
+export interface DriftLine {
+  readonly category: DriftCategory;
+  readonly kind?: StructureRow['kind'];
+  readonly table?: string;
+  readonly name?: string;
+  readonly field?: string;
+  readonly stage?: EvaluationStage;
+  readonly expected?: DriftValue;
+  readonly observed?: DriftValue;
+}
+export interface StructureDrift { readonly lines: readonly DriftLine[]; readonly omitted: number }
+const driftFields = {
+  col: ['type', 'not_null', 'default_expression'],
+  con: ['type', 'columns', 'ref_table', 'ref_columns', 'on_delete', 'on_update'],
+  idx: ['is_unique', 'columns', 'has_predicate'],
+} as const;
+const safeIdentifier = (v: unknown): v is string => typeof v === 'string' && identifier.test(v);
+function driftValue(value: unknown, kind: DriftLine['kind'], field: string): DriftValue {
+  if (value === null || typeof value === 'boolean') return value;
+  if (field === 'columns' || field === 'ref_columns')
+    return Array.isArray(value) && value.length <= 16 && value.every(safeIdentifier) ? Object.freeze([...value]) : '<omitted>';
+  if (typeof value !== 'string') return '<omitted>';
+  if (field === 'ref_table') return value.split('.').length === 2 && value.split('.').every(safeIdentifier) ? value : '<omitted>';
+  if (field === 'on_delete' || field === 'on_update') return /^[ arcdn]$/.test(value) ? value : '<omitted>';
+  if (field === 'type' && kind === 'con') return /^[pucf]$/.test(value) ? value : '<omitted>';
+  if (field === 'type') return /^[a-z0-9 ()]{1,40}$/.test(value) ? value : '<omitted>';
+  // Expressions can contain literals and are never disclosed.
+  return '<omitted>';
+}
+
+/** Closed output projection, shared by the diff and CLI. No raw row fields travel. */
+export function projectDriftLine(line: DriftLine): DriftLine {
+  const category = DRIFT_CATEGORIES.includes(line.category) ? line.category : 'unknown';
+  const kind = line.kind === 'col' || line.kind === 'con' || line.kind === 'idx' ? line.kind : undefined;
+  const result: { category: DriftCategory; kind?: StructureRow['kind']; table?: string; name?: string; field?: string; stage?: EvaluationStage; expected?: DriftValue; observed?: DriftValue } = { category };
+  if (kind) result.kind = kind;
+  if (line.table !== undefined) result.table = safeIdentifier(line.table) ? line.table : '<omitted>';
+  if (line.name !== undefined) result.name = safeIdentifier(line.name) ? line.name : '<omitted>';
+  if (line.stage !== undefined && EVALUATION_STAGES.includes(line.stage)) result.stage = line.stage;
+  if (category === 'definitions') {
+    // Only digests travel: never the text of an expression.
+    if ('expected' in line) result.expected = hexDigest(line.expected) ? line.expected : '<omitted>';
+    if ('observed' in line) result.observed = hexDigest(line.observed) ? line.observed : '<omitted>';
+  } else if (kind && line.field && (driftFields[kind] as readonly string[]).includes(line.field)) {
+    result.field = line.field;
+    if ('expected' in line) result.expected = driftValue(line.expected, kind, line.field);
+    if ('observed' in line) result.observed = driftValue(line.observed, kind, line.field);
+  }
+  return Object.freeze(result);
+}
+
+function stageOf(input: unknown, manifest: readonly ManifestEntry[], k: number): EvaluationStage | undefined {
+  try { return inspectStructure(input, manifest, k).stage; } catch { return undefined; }
+}
+
+/** Diagnostic only: uses the same shape tuples without changing verification or issuing queries. */
+export function diffStructure(input: unknown, manifest: readonly ManifestEntry[], k: number): StructureDrift {
+  const lines: DriftLine[] = [];
+  const minimal = (category: DriftCategory, stage?: EvaluationStage): StructureDrift =>
+    Object.freeze({ lines: Object.freeze([Object.freeze(stage ? { category, stage } : { category })]), omitted: 0 });
+  if (!Array.isArray(input)) return minimal('unreadable');
+  if (input.length > 2000) return minimal('unknown', 'size');
+  try {
+    const key = (r: StructureRow) => JSON.stringify([r.kind, r.table_name, r.name]);
+    const expected = new Map(derivePrefix(manifest, k).map(r => [key(r), r]));
+    const seen = new Set<string>();
+    const add = (category: DriftCategory, r: StructureRow, extra: Partial<DriftLine> = {}) =>
+      lines.push(projectDriftLine({ category, kind: r.kind, table: r.table_name, name: r.name, ...extra }));
+    for (const raw of input) {
+      const r = raw as StructureRow;
+      if (!r || !safeIdentifier(r.table_name) || !safeIdentifier(r.name)) { lines.push({ category: 'unreadable' }); continue; }
+      const id = key(r);
+      if (seen.has(id)) add('duplicate', r);
+      seen.add(id);
+      if (!readable(r)) { add('unreadable', r); continue; }
+      const prior = expected.get(id);
+      if (!prior) { add('unexpected', r); continue; }
+      try {
+        const before = JSON.parse(shapeLines([prior])[0]) as unknown[];
+        const after = JSON.parse(shapeLines([r])[0]) as unknown[];
+        driftFields[r.kind].forEach((field, i) => {
+          if (JSON.stringify(before[i + 3]) !== JSON.stringify(after[i + 3]))
+            add('changed', r, { field, expected: driftValue(before[i + 3], r.kind, field), observed: driftValue(after[i + 3], r.kind, field) });
+        });
+      } catch { add('unreadable', r); }
+    }
+    for (const [id, r] of expected) if (!seen.has(id)) add('missing', r);
+    // Same shape: the remaining difference can only be the normalized text of CHECK or predicate definitions.
+    const pin = manifest[k - 1]?.definitionsDigest;
+    if (lines.length === 0 && typeof pin === 'string') {
+      const observed = definitionsDigest(input as StructureRow[]);
+      if (observed !== pin) lines.push({ category: 'definitions', expected: pin, observed });
+    }
+  } catch { return minimal('unknown'); }
+  // The evaluation failed but the per-row comparison found nothing: say which stage of the evaluation failed.
+  if (!lines.length) return minimal('unknown', stageOf(input, manifest, k));
+  // Anomalies first, so the 50-line cap can never hide an unreadable or duplicated row behind many missing ones.
+  lines.sort((a, b) => {
+    if (DRIFT_RANK[a.category] !== DRIFT_RANK[b.category]) return DRIFT_RANK[a.category] - DRIFT_RANK[b.category];
+    for (const field of ['kind', 'table', 'name', 'field'] as const) {
+      const x = a[field] ?? ''; const y = b[field] ?? '';
+      if (x < y) return -1; if (x > y) return 1;
+    }
+    return JSON.stringify(a).localeCompare(JSON.stringify(b), 'en');
+  });
+  return Object.freeze({ lines: Object.freeze(lines.slice(0, 50).map(projectDriftLine)), omitted: Math.max(0, lines.length - 50) });
 }

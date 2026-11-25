@@ -3,7 +3,8 @@ import { ENTITIES, INVITATION_ENTITIES } from '../../persistence/entities';
 import { SCHEMA_MANIFEST } from '../migrations/schema-manifest';
 import { UP_STATEMENTS as INITIAL } from '../migrations/initial-schema.statements';
 import { UP_STATEMENTS as SECOND } from '../migrations/invitations.statements';
-import { definitionLines, footprintOf, deriveStructure, derivePrefix, shapeLines, definitionsDigest, evaluateStructure, normalizeExpression, type StructureRow } from './schema-structure';
+import { OBSERVED_INITIAL_DEFINITIONS } from './testing/observed-initial-definitions';
+import { definitionLines, footprintOf, deriveStructure, derivePrefix, shapeLines, definitionsDigest, evaluateStructure, normalizeExpression, diffStructure, projectDriftLine, type DriftLine, type StructureRow } from './schema-structure';
 
 // Solo las pruebas inspeccionan metadatos; las entidades de invitaciones siguen fuera del registro activo.
 const combined = SCHEMA_MANIFEST;
@@ -146,6 +147,274 @@ describe('límites cerrados de las líneas de definición', () => {
     for (const predicate of ["'á' = 'á'", 'id > 0\n', '('.repeat(700) + 'id' + ')'.repeat(700)]) {
       const input = rows(); input.find(r => r.kind === 'idx' && r.predicate !== null)!.predicate = predicate;
       expect(definitionLines(input)).toEqual({ definitions: [], definitionsOmitted: true });
+    }
+  });
+});
+
+
+describe('diagnóstico de deriva (solo informa; nunca cambia la verificación)', () => {
+  const original = deriveStructure([...INITIAL, ...SECOND]);
+  const diff = (rows: unknown, k = 2, manifest = combined) => diffStructure(rows, manifest, k);
+  const only = (rows: StructureRow[]) => diff(rows).lines;
+  const pinned = combined.map((e, i) => ({ ...e, definitionsDigest: definitionsDigest(deriveStructure(combined.slice(0, i + 1).flatMap(e => [...e.up]))) }));
+
+  it('una estructura idéntica no produce líneas de forma ni de definiciones', () => {
+    expect(diff(clone(original), 2, pinned)).toEqual({ lines: [{ category: 'unknown', stage: 'passed' }], omitted: 0 });
+  });
+  it.each([
+    ['falta columna', (rows: StructureRow[]) => { rows.splice(rows.findIndex(r => r.kind === 'col'), 1); }, 'missing', 'col'],
+    ['sobra columna', (rows: StructureRow[]) => { rows.push({ ...rows.find(r => r.kind === 'col')!, name: 'extra' }); }, 'unexpected', 'col'],
+    ['falta constraint', (rows: StructureRow[]) => { rows.splice(rows.findIndex(r => r.kind === 'con' && r.type === 'f'), 1); }, 'missing', 'con'],
+    ['falta índice', (rows: StructureRow[]) => { rows.splice(rows.findIndex(r => r.kind === 'idx' && !r.is_unique), 1); }, 'missing', 'idx'],
+  ] as const)('%s', (_label, mutate, category, kind) => {
+    const rows = clone(original); mutate(rows);
+    const lines = only(rows);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ category, kind });
+    expect(lines[0]).not.toHaveProperty('field');
+  });
+  it.each([
+    ['tipo', (rows: StructureRow[]) => { rows.find(r => r.kind === 'col')!.type = 'text'; }, 'col', 'type'],
+    ['nulabilidad', (rows: StructureRow[]) => { rows.find(r => r.kind === 'col')!.not_null = false; }, 'col', 'not_null'],
+    ['columnas de una FK', (rows: StructureRow[]) => { rows.find(r => r.type === 'f' && r.columns!.length > 1)!.columns!.reverse(); }, 'con', 'columns'],
+    ['destino de una FK', (rows: StructureRow[]) => { rows.find(r => r.type === 'f')!.ref_table = 'alien.organizations'; }, 'con', 'ref_table'],
+    ['acción DELETE', (rows: StructureRow[]) => { rows.find(r => r.type === 'f')!.on_delete = 'a'; }, 'con', 'on_delete'],
+    ['acción UPDATE', (rows: StructureRow[]) => { rows.find(r => r.type === 'f')!.on_update = 'a'; }, 'con', 'on_update'],
+    ['unicidad de un índice', (rows: StructureRow[]) => { rows.find(r => r.kind === 'idx')!.is_unique = false; }, 'idx', 'is_unique'],
+    ['columnas de un índice', (rows: StructureRow[]) => { rows.find(r => r.kind === 'idx')!.columns = ['version']; }, 'idx', 'columns'],
+    ['predicado de un índice parcial', (rows: StructureRow[]) => { rows.find(r => r.kind === 'idx' && r.predicate !== null)!.predicate = null; }, 'idx', 'has_predicate'],
+  ] as const)('cambia %s con campo, valor esperado y observado', (_label, mutate, kind, field) => {
+    const rows = clone(original); mutate(rows);
+    const lines = only(rows);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ category: 'changed', kind, field });
+    expect(lines[0]).toHaveProperty('expected'); expect(lines[0]).toHaveProperty('observed');
+    expect(lines[0].expected).not.toEqual(lines[0].observed);
+  });
+  it('el valor por defecto nunca se divulga, solo si existe o no', () => {
+    const rows = clone(original); rows.find(r => r.kind === 'col')!.default_expression = "'secreto-7Q'";
+    const [line] = only(rows);
+    expect(line).toMatchObject({ category: 'changed', field: 'default_expression', expected: null, observed: '<omitted>' });
+    expect(JSON.stringify(line)).not.toContain('secreto-7Q');
+  });
+  it('si la forma coincide y hay pin, un texto de CHECK o de predicado distinto informa solo los dos digests', () => {
+    for (const kind of ['check', 'predicate']) {
+      const rows = clone(original);
+      if (kind === 'check') rows.find(r => r.type === 'c')!.definition = "CHECK ('secreto-7Q' = 'secreto-7Q')";
+      else rows.find(r => r.kind === 'idx' && r.predicate !== null)!.predicate = "'secreto-7Q' = 'secreto-7Q'";
+      const result = diff(rows, 2, pinned);
+      expect(result).toEqual({ lines: [{ category: 'definitions', expected: pinned[1].definitionsDigest, observed: definitionsDigest(rows) }], omitted: 0 });
+      expect(JSON.stringify(result)).not.toContain('secreto-7Q');
+    }
+  });
+  it('sin pin no hay línea de definiciones: no se puede afirmar nada sobre ellas', () => {
+    const rows = clone(original); rows.find(r => r.type === 'c')!.definition = 'CHECK (true)';
+    expect(diff(rows, 2, combined)).toEqual({ lines: [{ category: 'unknown', stage: 'passed' }], omitted: 0 });
+  });
+  it('filas duplicadas, ilegibles o de otra forma se marcan sin copiar su contenido', () => {
+    const duplicated = diff([...original, original[0]]).lines;
+    expect(duplicated.some(l => l.category === 'duplicate')).toBe(true);
+    const unreadable = diff(original.map((r, i) => i ? r : { ...r, type: undefined })).lines;
+    expect(unreadable.some(l => l.category === 'unreadable')).toBe(true);
+    expect(diff([{ kind: 'col', table_name: 'x; DROP', name: 'y' }]).lines.some(l => l.category === 'unreadable')).toBe(true);
+    for (const rows of [null, {}, 'texto']) expect(diff(rows)).toEqual({ lines: [{ category: 'unreadable' }], omitted: 0 });
+    expect(diff(Array(2001).fill(original[0]))).toEqual({ lines: [{ category: 'unknown', stage: 'size' }], omitted: 0 });
+  });
+  it('limita a 50 líneas, cuenta las omitidas y ordena de forma estable', () => {
+    const result = diff([]);
+    expect(result.lines).toHaveLength(50);
+    expect(result.omitted).toBe(original.length - 50);
+    expect(Object.isFrozen(result)).toBe(true); expect(Object.isFrozen(result.lines)).toBe(true);
+    expect(diff(clone(original).slice(1).reverse())).toEqual(diff(clone(original).slice(1)));
+    const keys = result.lines.map(l => [l.kind, l.table, l.name].join('|'));
+    expect(keys).toEqual([...keys].sort());
+    // Las anomalías van primero: el tope no puede ocultarlas detrás de muchas filas ausentes.
+    const mixed = diff([{ kind: 'col', table_name: 'x; DROP', name: 'y' }, ...clone(original).slice(0, 1)]);
+    expect(mixed.lines[0]).toEqual({ category: 'unreadable' });
+    expect(mixed.lines).toHaveLength(50);
+  });
+  it('projectDriftLine descarta todo lo que no sea una proyección cerrada y segura', () => {
+    expect(projectDriftLine({ category: 'inventada' as never })).toEqual({ category: 'unknown' });
+    expect(projectDriftLine({ category: 'changed', kind: 'col', table: 'users; DROP', name: 'id', field: 'type', expected: 'uuid', observed: 'text' }))
+      .toEqual({ category: 'changed', kind: 'col', table: '<omitted>', name: 'id', field: 'type', expected: 'uuid', observed: 'text' });
+    expect(projectDriftLine({ category: 'changed', kind: 'col', table: 'users', name: 'id', field: 'definition' as never, expected: 'x', observed: 'y' }))
+      .toEqual({ category: 'changed', kind: 'col', table: 'users', name: 'id' });
+    expect(projectDriftLine({ category: 'changed', kind: 'col', table: 'users', name: 'id', field: 'type', expected: "uuid'; DROP", observed: 'a'.repeat(41) }))
+      .toMatchObject({ expected: '<omitted>', observed: '<omitted>' });
+    expect(projectDriftLine({ category: 'changed', kind: 'idx', table: 'users', name: 'IX_x', field: 'columns', expected: Array(17).fill('a'), observed: ['a', 'b c'] }))
+      .toMatchObject({ expected: '<omitted>', observed: '<omitted>' });
+    expect(projectDriftLine({ category: 'definitions', expected: 'a'.repeat(64), observed: 'x\n' + 'a'.repeat(62) }))
+      .toEqual({ category: 'definitions', expected: 'a'.repeat(64), observed: '<omitted>' });
+    expect(projectDriftLine({ category: 'changed', kind: 'con', table: 'users', name: 'FK', field: 'columns', expected: ['id'], observed: ['id'], extra: 'secreto' } as DriftLine & { extra: string }))
+      .not.toHaveProperty('extra');
+    expect(Object.isFrozen(projectDriftLine({ category: 'missing' }))).toBe(true);
+  });
+});
+
+
+describe('columnas de un CHECK: conjunto; en claves, únicas, FK e índices: orden estricto', () => {
+  const original = deriveStructure([...INITIAL, ...SECOND]);
+  const pinned = combined.map((e, i) => ({ ...e, definitionsDigest: definitionsDigest(deriveStructure(combined.slice(0, i + 1).flatMap(e => [...e.up]))) }));
+  const times = (rows: StructureRow[]) => rows.find(r => r.name === 'CK_user_sessions_times')!;
+  const composite = (rows: StructureRow[], kind: 'con' | 'idx', type: string | undefined, name: string) =>
+    rows.find(r => r.kind === kind && r.name === name && (type === undefined || r.type === type))!;
+
+  it('la derivación conserva las columnas del CHECK de sesiones y la base puede listarlas en otro orden', () => {
+    expect(new Set(times(original).columns)).toEqual(new Set(['created_at', 'last_seen_at', 'expires_at', 'revoked_at']));
+    // Orden observado en agenda_test: el de la primera aparición en la expresión.
+    const rows = clone(original); times(rows).columns = ['expires_at', 'created_at', 'last_seen_at', 'revoked_at'];
+    expect(shapeLines(rows)).toEqual(shapeLines(original));
+    expect(definitionsDigest(rows)).toBe(definitionsDigest(original));
+    expect(evaluateStructure(rows, combined, 2)).toMatchObject({ structure: 'definitions_unpinned', code: null });
+    expect(evaluateStructure(rows, pinned, 2)).toMatchObject({ structure: 'verified', code: null });
+  });
+  it('acepta cualquier permutación de las columnas de cualquier CHECK', () => {
+    const rows = clone(original);
+    for (const r of rows) if (r.kind === 'con' && r.type === 'c' && r.columns!.length > 1) r.columns!.reverse();
+    expect(rows.some(r => r.type === 'c' && r.columns!.length > 1)).toBe(true);
+    expect(evaluateStructure(rows, pinned, 2)).toMatchObject({ structure: 'verified', code: null });
+  });
+  it.each([
+    ['falta una columna', (rows: StructureRow[]) => { times(rows).columns = ['expires_at', 'created_at', 'last_seen_at']; }],
+    ['sobra una columna', (rows: StructureRow[]) => { times(rows).columns = ['expires_at', 'created_at', 'last_seen_at', 'revoked_at', 'id']; }],
+    ['otra columna', (rows: StructureRow[]) => { times(rows).columns = ['expires_at', 'created_at', 'last_seen_at', 'user_id']; }],
+    ['sin columnas repetidas pero distintas', (rows: StructureRow[]) => { times(rows).columns = ['created_at']; }],
+  ])('un CHECK con %s sigue siendo deriva, incluso con otro orden', (_label, mutate) => {
+    const rows = clone(original); mutate(rows);
+    expect(evaluateStructure(rows, pinned, 2)).toMatchObject({ structure: 'drift', code: 'schema_drift', structureDigest: null });
+    const lines = diffStructure(rows, pinned, 2).lines;
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ category: 'changed', kind: 'con', table: 'user_sessions', name: 'CK_user_sessions_times', field: 'columns' });
+  });
+  it('un CHECK con columnas repetidas se rechaza como fila ilegible', () => {
+    const rows = clone(original); times(rows).columns = ['created_at', 'created_at', 'expires_at', 'last_seen_at'];
+    expect(evaluateStructure(rows, pinned, 2)).toMatchObject({ structure: 'drift', code: 'schema_drift' });
+  });
+  it.each([
+    ['clave primaria compuesta', 'con', 'p', 'PK_invitation_companies', 'columns'],
+    ['única compuesta', 'con', 'u', 'UQ_organization_memberships_org_user', 'columns'],
+    ['FK compuesta (columnas locales)', 'con', 'f', 'FK_invitation_companies_company', 'columns'],
+    ['FK compuesta (columnas referenciadas)', 'con', 'f', 'FK_invitation_companies_company', 'ref_columns'],
+    ['índice compuesto', 'idx', undefined, 'IX_invitations_org_created', 'columns'],
+    ['índice de respaldo de la clave primaria', 'idx', undefined, 'PK_invitation_companies', 'columns'],
+  ] as const)('el orden sigue importando en %s', (_label, kind, type, name, field) => {
+    const rows = clone(original);
+    const target = composite(rows, kind, type, name);
+    expect(target[field]!.length).toBeGreaterThan(1);
+    target[field]!.reverse();
+    expect(evaluateStructure(rows, pinned, 2)).toMatchObject({ structure: 'drift', code: 'schema_drift' });
+    const lines = diffStructure(rows, pinned, 2).lines;
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ category: 'changed', field });
+  });
+  it('la expresión del CHECK sigue comprobándose por separado, con su digest', () => {
+    const rows = clone(original); times(rows).columns!.reverse();
+    times(rows).definition = 'CHECK (expires_at > created_at)';
+    expect(evaluateStructure(rows, pinned, 2)).toMatchObject({ structure: 'drift', code: 'schema_drift' });
+    expect(diffStructure(rows, pinned, 2).lines).toEqual([{ category: 'definitions', expected: pinned[1].definitionsDigest, observed: definitionsDigest(rows) }]);
+    expect(evaluateStructure(rows, combined, 2)).toMatchObject({ structure: 'definitions_unpinned' });
+  });
+  it('una diferencia solo de orden en un CHECK no produce líneas de deriva', () => {
+    const rows = clone(original); times(rows).columns!.reverse();
+    expect(diffStructure(rows, pinned, 2)).toEqual({ lines: [{ category: 'unknown', stage: 'passed' }], omitted: 0 });
+  });
+});
+
+
+describe('etapa que falla cuando la evaluación rechaza y el diff queda vacío', () => {
+  const original = deriveStructure([...INITIAL, ...SECOND]);
+  const roleCheck = (rows: StructureRow[]) => rows.find(r => r.name === 'CK_organization_memberships_role')!;
+
+  it('acepta la forma con ARRAY[...] con que PostgreSQL devuelve un IN, y con el orden de columnas observado', () => {
+    const rows = clone(original);
+    roleCheck(rows).definition = "CHECK (role::text = ANY (ARRAY['community_manager'::character varying, 'worker'::character varying, 'client'::character varying]::text[]))";
+    rows.find(r => r.name === 'CK_user_sessions_times')!.columns = ['expires_at', 'created_at', 'last_seen_at', 'revoked_at'];
+    expect(normalizeExpression(roleCheck(rows).definition!)).toContain('ARRAY [');
+    expect(evaluateStructure(rows, combined, 2)).toMatchObject({ structure: 'definitions_unpinned', code: null });
+    expect(definitionLines(rows).definitionsOmitted).toBe(false);
+  });
+  it.each([
+    ['definitions', (rows: StructureRow[]) => { roleCheck(rows).definition = 'CHECK (role @ 1)'; }],
+    ['shape', (rows: StructureRow[]) => { roleCheck(rows).columns = ['id']; }],
+    ['rows', (rows: StructureRow[]) => { roleCheck(rows).columns = ['no valido!']; }],
+    ['duplicates', (rows: StructureRow[]) => { rows.push({ ...roleCheck(rows) }); }],
+  ])('indica la etapa %s sin revelar contenido', (stage, mutate) => {
+    const rows = clone(original); mutate(rows);
+    expect(evaluateStructure(rows, combined, 2)).toMatchObject({ structure: 'drift', code: 'schema_drift' });
+    const drift = diffStructure(rows, combined, 2);
+    expect(drift.lines.every(l => l.category !== 'unknown' || l.stage === stage)).toBe(true);
+    if (stage === 'definitions') expect(drift).toEqual({ lines: [{ category: 'unknown', stage: 'definitions' }], omitted: 0 });
+    expect(JSON.stringify(drift)).not.toContain('@');
+  });
+  it('coincide con la etapa que no es una lista: no es una matriz', () => {
+    expect(diffStructure('x', combined, 2).lines[0]).toEqual({ category: 'unreadable' });
+  });
+  it('una etapa fuera del conjunto cerrado no viaja', () => {
+    expect(projectDriftLine({ category: 'unknown', stage: 'secreto' } as unknown as DriftLine)).toEqual({ category: 'unknown' });
+    expect(projectDriftLine({ category: 'unknown', stage: 'definitions' })).toEqual({ category: 'unknown', stage: 'definitions' });
+  });
+});
+
+
+describe('normalización de operadores de patrón y literales', () => {
+  it.each(['~', '~*', '!~', '!~*', '~~', '~~*', '!~~', '!~~*'])('conserva el operador %s como un único token', op => {
+    expect(normalizeExpression(`CHECK (a ${op} 'x'::text)`)).toBe(`CHECK ( a ${op} 'x' :: text )`);
+  });
+  it('no confunde ~~ (LIKE) con ~ ~ (coincidencia con negación unaria), ni los demás operadores entre sí', () => {
+    const forms = ['a ~~ b', 'a ~ ~b', 'a ~~* b', 'a ~* ~b', 'a !~~ b', 'a !~ ~b', 'a !~~* b', 'a !~* ~b', 'a ~ b', 'a ~* b', 'a !~ b', 'a !~* b'];
+    const out = forms.map(f => normalizeExpression(f));
+    expect(new Set(out).size).toBe(forms.length);
+  });
+  it('CK_users_password_hash, tal como lo imprime PostgreSQL, conserva ~~ y el literal intacto', () => {
+    const pg = "CHECK (password_hash ~~ '$argon2id$%'::text AND char_length(password_hash) >= 40 AND char_length(password_hash) <= 512)";
+    const n = normalizeExpression(pg);
+    expect(n).toContain("password_hash ~~ '$argon2id$%' :: text");
+    expect(n).not.toContain('~ ~');
+    expect(normalizeExpression("CHECK (password_hash ~~ '$argon2id$%'::text)")).not.toBe(normalizeExpression("CHECK (password_hash ~~ '$argon2id$%%'::text)"));
+    expect(normalizeExpression("CHECK (a ~~ '  x'::text)")).toContain("'  x'");
+  });
+});
+
+
+describe('definiciones observadas en agenda_test para el esquema inicial (offline)', () => {
+  const OBSERVED_DIGEST = '2264ec9a2899ced9beb0e24280bd5d3a260e46016d9f6e5450076f5089985c94';
+  const key = (r: StructureRow) => (r.kind === 'con' && r.type === 'c' ? `check:${r.table_name}:${r.name}` : r.kind === 'idx' && r.predicate !== null ? `predicate:${r.table_name}:${r.name}` : null);
+  const observed = () => {
+    const rows = deriveStructure(INITIAL);
+    for (const r of rows) {
+      const k = key(r); if (k === null) continue;
+      if (!(k in OBSERVED_INITIAL_DEFINITIONS)) throw new Error(`sin definición observada: ${k}`);
+      if (r.kind === 'con') r.definition = OBSERVED_INITIAL_DEFINITIONS[k]; else r.predicate = OBSERVED_INITIAL_DEFINITIONS[k];
+    }
+    return rows;
+  };
+  it('hay una definición observada por cada una de las 33 CHECK y los 4 predicados, y ninguna sobra', () => {
+    const keys = deriveStructure(INITIAL).map(key).filter((k): k is string => k !== null);
+    expect(keys.filter(k => k.startsWith('check:'))).toHaveLength(33);
+    expect(keys.filter(k => k.startsWith('predicate:'))).toHaveLength(4);
+    expect(Object.keys(OBSERVED_INITIAL_DEFINITIONS).sort()).toEqual([...keys].sort());
+  });
+  it('el digest de la estructura con esas definiciones es el observado en la base', () => {
+    expect(definitionsDigest(observed())).toBe(OBSERVED_DIGEST);
+  });
+  it('el manifiesto fija ese digest solo en la migración inicial; invitaciones sigue sin pin', () => {
+    expect(SCHEMA_MANIFEST.map(e => e.definitionsDigest)).toEqual([OBSERVED_DIGEST, null]);
+    expect(definitionsDigest(observed())).toBe(SCHEMA_MANIFEST[0].definitionsDigest);
+    expect(SCHEMA_MANIFEST.map(e => e.sha256.slice(0, 8))).toEqual(['33d0baa6', 'e2c0f806']);
+  });
+  it('con el pin, la estructura observada del prefijo 1 queda verified y una definición alterada es deriva; el prefijo 2 sigue sin pin', () => {
+    expect(evaluateStructure(observed(), SCHEMA_MANIFEST, 1)).toMatchObject({ structure: 'verified', structureDigest: OBSERVED_DIGEST, code: null });
+    const rows = observed(); const r = rows.find(x => x.name === 'CK_users_password_hash')!;
+    r.definition = r.definition!.replace('>= 40', '>= 41');
+    expect(evaluateStructure(rows, SCHEMA_MANIFEST, 1)).toMatchObject({ structure: 'drift', code: 'schema_drift' });
+    expect(diffStructure(rows, SCHEMA_MANIFEST, 1).lines).toEqual([{ category: 'definitions', expected: OBSERVED_DIGEST, observed: definitionsDigest(rows) }]);
+    expect(evaluateStructure(deriveStructure([...INITIAL, ...SECOND]), SCHEMA_MANIFEST, 2)).toMatchObject({ structure: 'definitions_unpinned', code: null });
+  });
+  it('cualquier alteración de una definición observada cambia el digest', () => {
+    for (const mutate of [(d: string) => d.replace('~~', '~'), (d: string) => d.replace("'$argon2id$%'", () => "'$argon2id$'"), (d: string) => d.replace('>= 40', '>= 41')]) {
+      const rows = observed(); const r = rows.find(x => x.name === 'CK_users_password_hash')!;
+      r.definition = mutate(r.definition!);
+      expect(definitionsDigest(rows)).not.toBe(OBSERVED_DIGEST);
     }
   });
 });

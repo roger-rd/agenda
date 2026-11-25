@@ -1,4 +1,4 @@
-import { definitionLines, evaluateStructure, derivePrefix, type DefinitionLine, type StructureRow, type StructureStatus } from './schema-structure';
+import { diffStructure, type StructureDrift, definitionLines, evaluateStructure, derivePrefix, type DefinitionLine, type StructureRow, type StructureStatus } from './schema-structure';
 import { SCHEMA_MANIFEST, verifyManifest, type ManifestEntry } from '../migrations/schema-manifest';
 import {
   classifyState, decideAction, evaluateExecuted, tablesOfPrefix, evaluateApplicationPrivileges, evaluateEmpty, evaluateIdentity, evaluateLock, evaluateMigrationsTablePrivileges,
@@ -50,6 +50,7 @@ export type Outcome = 'planned' | 'applied' | 'reverted' | 'already_applied' | '
 export type Closure = 'verified' | 'unverified';
 
 export interface RunResult {
+  readonly drift?: StructureDrift;
   readonly definitions: readonly DefinitionLine[];
   readonly definitionsOmitted: boolean;
   readonly command: SchemaCommand | null;
@@ -123,6 +124,7 @@ function bounded<T>(timers: Timers, fn: () => Promise<T>, ms: number): Promise<T
 }
 
 export interface RunInput {
+  readonly showDrift?: boolean;
   readonly showDefinitions?: boolean;
   readonly manifest?: readonly ManifestEntry[];
   readonly command: SchemaCommand;
@@ -142,6 +144,7 @@ export async function runSchema(input: RunInput): Promise<RunResult> {
   const manifestNames = () => manifest.map(e => e.name);
   const started = clock();
   const out = {
+    drift: undefined as StructureDrift | undefined,
     definitions: Object.freeze([]) as readonly DefinitionLine[], definitionsOmitted: false,
     structure: 'unchecked' as StructureStatus, structureDigest: null as string | null,
     stage: 'start', state: null as SchemaState | null, executed: [] as string[], pending: [] as string[], findings: [] as RunnerCode[],
@@ -192,6 +195,7 @@ export async function runSchema(input: RunInput): Promise<RunResult> {
     const rows = await read('structure', STRUCTURE_SQL, [tablesOfPrefix(manifest, k)]);
     const result = evaluateStructure(rows, manifest, k);
     out.structure = result.structure; out.structureDigest = result.structureDigest;
+    if (command === 'plan' && input.showDrift && result.structure === 'drift') out.drift = diffStructure(rows, manifest, k);
     must(result.code);
     if (command === 'plan' && input.showDefinitions && ['verified', 'definitions_unpinned'].includes(result.structure)) {
       const lines = definitionLines(rows as StructureRow[]);
@@ -305,6 +309,7 @@ export async function runSchema(input: RunInput): Promise<RunResult> {
   const clean = out.code === null && out.closure === 'verified' && out.resources === 'closed';
   const exit = clean ? EXIT.ok : (commitAmbiguous || out.closure === 'unverified' ? EXIT.unconfirmed : EXIT.refused);
   return Object.freeze({
+    ...(out.drift ? { drift: out.drift } : {}),
     definitions: out.definitions, definitionsOmitted: out.definitionsOmitted,
     command, target: TARGET.database, outcome: out.outcome, ok: exit === 0, code: out.code, sqlstate: out.sqlstate, state: out.state, stage: out.stage, structure: out.structure, structureDigest: out.structureDigest,
     executed: Object.freeze([...out.executed]), pending: Object.freeze([...out.pending]), findings: Object.freeze([...out.findings]),

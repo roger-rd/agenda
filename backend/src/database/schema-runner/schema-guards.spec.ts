@@ -15,7 +15,7 @@ const short = createHash('sha256').update(JSON.stringify(SCHEMA_MANIFEST.map(e =
 describe('argumentos y confirmación', () => {
   const base = ['--env=test', '--target=agenda_test'];
   it('acepta cada orden con sus tres opciones exactas', () => {
-    expect(parseArguments(['plan', ...base, '--confirm=PLAN:agenda_test'])).toEqual({ command: 'plan', confirm: 'PLAN:agenda_test', showDefinitions: false });
+    expect(parseArguments(['plan', ...base, '--confirm=PLAN:agenda_test'])).toEqual({ command: 'plan', confirm: 'PLAN:agenda_test', showDefinitions: false, showDrift: false });
     expect(parseArguments(['apply', '--confirm=x', ...base]).command).toBe('apply');
     expect(parseArguments(['revert', ...base, '--confirm=x']).command).toBe('revert');
   });
@@ -260,6 +260,28 @@ describe('bloqueo, vacío de tablas y transacción cerrada', () => {
       { clientStatus: 'I', queryRunnerActive: false, server: [{ ...closedRow, no_xid: null }] }, { clientStatus: 'X', queryRunnerActive: false, server: [closedRow] },
       { clientStatus: 'I', queryRunnerActive: false, server: [{}] },
     ]) expect(evaluateTransactionClosed(evidence)).toBe('transaction_unverified');
+  });
+});
+
+describe('diagnóstico de deriva optativo solo en plan', () => {
+  const flags = ['--env=test', '--target=agenda_test', '--confirm=PLAN:agenda_test'];
+  it('acepta una vez, solo o con --show-definitions, y conserva la autorización de plan', () => {
+    expect(parseArguments(['plan', ...flags, '--show-drift'])).toMatchObject({ showDrift: true, showDefinitions: false });
+    expect(parseArguments(['plan', ...flags, '--show-drift', '--show-definitions'])).toMatchObject({ showDrift: true, showDefinitions: true });
+    expect(authorize(['plan', ...flags, '--show-drift'])).toBe('plan');
+    expect(parseArguments(['plan', ...flags])).toMatchObject({ showDrift: false });
+  });
+  it.each([
+    ['plan', '--show-drift', '--show-drift'], ['plan', '--show-drift=x'], ['plan', '--show-drift', '--show-drift=1'],
+    ['apply', '--show-drift'], ['revert', '--show-drift'],
+  ])('rechaza combinación %j', (...argv) => {
+    expect(codeOf(() => parseArguments([argv[0], ...flags, ...argv.slice(1)]))).toBe('args_invalid');
+  });
+  it('apply y revert con la opción no se autorizan ni con su token correcto', () => {
+    for (const command of ['apply', 'revert'] as const) {
+      const token = confirmationFor(command);
+      expect(codeOf(() => authorize([command, '--env=test', '--target=agenda_test', `--confirm=${token}`, '--show-drift']))).toBe('args_invalid');
+    }
   });
 });
 

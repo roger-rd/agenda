@@ -2,8 +2,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ts from 'typescript';
 import { SCHEMA_MANIFEST } from '../migrations/schema-manifest';
+import { withObservedDefinitions } from './testing/observed-initial-definitions';
 import { derivePrefix, definitionsDigest, normalizeExpression } from './schema-structure';
-import { DEFINITIONS_PREFIX, runCli, type CliDeps } from './cli';
+import { DEFINITIONS_PREFIX, DRIFT_PREFIX, runCli, type CliDeps } from './cli';
 import type { CredentialFs, FileFacts } from './credential-file';
 import { confirmationFor } from './schema-guards';
 import type { SchemaPort } from './schema-runner';
@@ -43,7 +44,7 @@ function planPort(over: { prefix?: 1 | 2; structure?: unknown; connectFails?: bo
           { name: 'schema_migrations', kind: 'r' }, { name: 'schema_migrations_id_seq', kind: 'S' }] : [];
         case SQL.MIGRATIONS_COLUMNS_SQL: return [{ name: 'id', type: 'integer' }, { name: 'timestamp', type: 'bigint' }, { name: 'name', type: 'character varying' }];
         case SQL.EXECUTED_SQL: return entries.map(e => ({ name: e.name, timestamp: String(e.timestamp) }));
-        case SQL.STRUCTURE_SQL: return 'structure' in over ? over.structure : derivePrefix(SCHEMA_MANIFEST, over.prefix!);
+        case SQL.STRUCTURE_SQL: return 'structure' in over ? over.structure : withObservedDefinitions(derivePrefix(SCHEMA_MANIFEST, over.prefix!));
         case SQL.APPLICATION_PRIVILEGES_SQL: return tables.flatMap(name => ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'].map(privilege =>
           ({ name, privilege, effective: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'].includes(privilege), grantable: false })));
         case SQL.MIGRATIONS_PRIVILEGES_SQL: return [
@@ -100,7 +101,7 @@ describe('línea de órdenes del runner de esquema', () => {
       ['confirmación de otra orden', args('apply', confirmationFor('plan'))], ['confirmación de revert para apply', args('apply', confirmationFor('revert'))],
       ['resumen de manifiesto erróneo', args('apply', 'APPLY:agenda_test:00000000')], ['producción', ['plan', '--env=production', '--target=agenda_test', '--confirm=PLAN:agenda_test']],
       ['desarrollo', ['plan', '--env=development', '--target=agenda_test', '--confirm=PLAN:agenda_test']], ['otra base', ['plan', '--env=test', '--target=agenda_dev', '--confirm=PLAN:agenda_test']],
-      ['opción extra', [...args('plan'), '--force']], ['definiciones con apply', [...args('apply'), '--show-definitions']], ['opción repetida', [...args('plan'), '--env=test']], ['argumento suelto', [...args('plan'), 'x']],
+      ['opción extra', [...args('plan'), '--force']], ['definiciones con apply', [...args('apply'), '--show-definitions']], ['deriva con apply', [...args('apply'), '--show-drift']], ['deriva con revert', [...args('revert'), '--show-drift']], ['deriva repetida', [...args('plan'), '--show-drift', '--show-drift']], ['opción repetida', [...args('plan'), '--env=test']], ['argumento suelto', [...args('plan'), 'x']],
     ])('%s', async (_name, argv) => {
       const f = fakeFs(); let opened = 0;
       const d = deps(argv as string[], { fs: f.fs, openPort: () => { opened++; return planPort().port; } });
@@ -190,14 +191,15 @@ describe('línea de órdenes del runner de esquema', () => {
 
 describe('contrato de salida de definiciones y ruta compilada', () => {
   it.each([1, 2] as const)('stdout exacto para prefijo %i y catálogo en cualquier orden', async prefix => {
-    const rows = derivePrefix(SCHEMA_MANIFEST, prefix);
+    // Prefijo 1: el catálogo trae las definiciones tal como las imprime PostgreSQL y el pin del manifiesto las verifica; prefijo 2 sigue sin pin.
+    const rows = withObservedDefinitions(derivePrefix(SCHEMA_MANIFEST, prefix));
     const digest = definitionsDigest(rows);
     const lines = rows.flatMap(r => r.kind === 'con' && r.type === 'c' ? [{ kind: 'check', table: r.table_name, name: r.name, definition: normalizeExpression(r.definition!) }] :
       r.kind === 'idx' && r.predicate !== null ? [{ kind: 'predicate', table: r.table_name, name: r.name, definition: normalizeExpression(r.predicate!) }] : [])
       .sort((a, b) => { for (const key of ['kind', 'table', 'name'] as const) { if (a[key] < b[key]) return -1; if (a[key] > b[key]) return 1; } return 0; });
     const expected = [SUMMARY_PREFIX + JSON.stringify({
       command: 'plan', target: 'agenda_test', outcome: 'planned', ok: true, code: null, sqlstate: null,
-      state: prefix === 2 ? 'applied' : 'upgradable', stage: 'structure', structure: 'definitions_unpinned', structureDigest: digest,
+      state: prefix === 2 ? 'applied' : 'upgradable', stage: 'structure', structure: prefix === 1 ? 'verified' : 'definitions_unpinned', structureDigest: digest,
       executed: SCHEMA_MANIFEST.slice(0, prefix).map(e => e.name), pending: SCHEMA_MANIFEST.slice(prefix).map(e => e.name), findings: [],
       committed: false, transaction: 'rolled_back', lock: 'released', closure: 'verified', resources: 'closed', elapsedMs: 0, exit: 0,
     }) + '\n', ...lines.map(line => DEFINITIONS_PREFIX + JSON.stringify(line) + '\n'),
@@ -237,5 +239,131 @@ describe('contrato de salida de definiciones y ruta compilada', () => {
     expect(source).toContain('if (require.main === module) main();');
     expect(source).toContain('<plan|apply|revert> --env=test --target=agenda_test --confirm=<token> [--show-definitions solo en plan]');
     expect(source.indexOf('command = authorize(deps.argv)')).toBeLessThan(source.indexOf('const config = loadOwnerConfiguration'));
+  });
+});
+
+
+describe('plan --show-drift: salida controlada', () => {
+  const driftLines = (lines: string[]) => lines.filter(l => l.startsWith(DRIFT_PREFIX)).map(l => JSON.parse(l.slice(DRIFT_PREFIX.length)) as Record<string, unknown>);
+  const tampered = () => { const rows = derivePrefix(SCHEMA_MANIFEST, 2); rows.find(r => r.kind === 'col')!.type = 'text'; rows.find(r => r.kind === 'col' && r.name !== rows.find(x => x.kind === 'col')!.name)!.not_null = false; return rows; };
+
+  it('con deriva imprime el resumen, una línea por diferencia y un cierre con el conteo', async () => {
+    const f = planPort({ prefix: 2, structure: tampered() });
+    const d = deps([...args('plan'), '--show-drift'], { openPort: () => f.port });
+    expect(await runCli(d.base)).toBe(2);
+    expect(d.lines[0].startsWith(SUMMARY_PREFIX)).toBe(true);
+    const parsed = JSON.parse(d.lines[0].slice(SUMMARY_PREFIX.length));
+    expect(parsed).toMatchObject({ outcome: 'planned', code: 'schema_drift', structure: 'drift', structureDigest: null });
+    expect(parsed).not.toHaveProperty('drift');
+    const lines = driftLines(d.lines);
+    expect(lines).toHaveLength(3);
+    expect(lines.slice(0, 2).every(l => l.category === 'changed' && ['type', 'not_null'].includes(l.field as string))).toBe(true);
+    expect(lines[2]).toEqual({ count: 2, omitted: 0 });
+    expect(d.lines.slice(1).every(l => l.startsWith(DRIFT_PREFIX) && l.endsWith('\n'))).toBe(true);
+    expect(f.events.filter(e => ['exec', 'migrate', 'revert', 'commit'].includes(e))).toEqual([]);
+  });
+  it('la opción no cambia el resumen ni el código de salida respecto de la misma orden sin ella', async () => {
+    const outputs: { lines: string[]; exit: number }[] = [];
+    for (const extra of [[], ['--show-drift']]) {
+      const f = planPort({ prefix: 2, structure: tampered() });
+      const d = deps([...args('plan'), ...extra], { openPort: () => f.port });
+      outputs.push({ exit: await runCli(d.base), lines: d.lines });
+    }
+    expect(outputs[1].exit).toBe(outputs[0].exit);
+    expect(outputs[1].lines[0]).toBe(outputs[0].lines[0]);
+    expect(outputs[0].lines).toHaveLength(1);
+    expect(outputs[1].lines.length).toBeGreaterThan(1);
+  });
+  it('un esquema vacío, uno verificado o uno sin pin no imprimen diagnóstico', async () => {
+    for (const port of [planPort(), planPort({ prefix: 2 }), planPort({ prefix: 1 })]) {
+      const d = deps([...args('plan'), '--show-drift'], { openPort: () => port.port });
+      await runCli(d.base);
+      expect(d.lines).toHaveLength(1);
+      expect(d.lines.join('')).not.toContain(DRIFT_PREFIX);
+    }
+  });
+  it('con ambas opciones y deriva solo se imprime el diagnóstico, nunca las definiciones', async () => {
+    const f = planPort({ prefix: 2, structure: tampered() });
+    const d = deps([...args('plan'), '--show-definitions', '--show-drift'], { openPort: () => f.port });
+    await runCli(d.base);
+    expect(driftLines(d.lines).length).toBeGreaterThan(0);
+    expect(d.lines.join('')).not.toContain(DEFINITIONS_PREFIX);
+  });
+  it('solo difiere el texto de una definición: dos digests y ninguna expresión', async () => {
+    const rows = derivePrefix(SCHEMA_MANIFEST, 2); rows.find(r => r.type === 'c')!.definition = "CHECK ('secreto-7Q' = 'secreto-7Q')";
+    // Con un manifiesto sin pin no se puede afirmar nada: el plan informa definiciones sin pin y no hay diagnóstico.
+    const f = planPort({ prefix: 2, structure: rows });
+    const d = deps([...args('plan'), '--show-drift'], { openPort: () => f.port });
+    expect(await runCli(d.base)).toBe(0);
+    expect(d.lines).toHaveLength(1);
+    expect(d.lines.join('')).not.toContain('secreto-7Q');
+  });
+  it('estructura ilegible o con más de 2000 filas: una línea de categoría y el cierre, sin contenido', async () => {
+    for (const structure of [null, 'ilegible', Array(2001).fill(derivePrefix(SCHEMA_MANIFEST, 2)[0])]) {
+      const f = planPort({ prefix: 2, structure });
+      const d = deps([...args('plan'), '--show-drift'], { openPort: () => f.port });
+      expect(await runCli(d.base)).toBe(2);
+      const lines = driftLines(d.lines);
+      expect(lines).toHaveLength(2);
+      expect(['unreadable', 'unknown']).toContain(lines[0].category);
+      expect(lines[1]).toEqual({ count: 1, omitted: 0 });
+    }
+  });
+  it('apply con la opción falla antes de credenciales y de abrir el puerto', async () => {
+    for (const command of ['apply', 'revert']) {
+      const f = fakeFs(), openPort = jest.fn();
+      const d = deps([...args(command), '--show-drift'], { fs: f.fs, openPort });
+      expect(await runCli(d.base)).toBe(2);
+      expect(summary(d.lines).code).toBe('args_invalid');
+      expect(f.calls).toEqual([]); expect(openPort).not.toHaveBeenCalled();
+    }
+  });
+  it('la salida nunca contiene credenciales ni texto del driver', async () => {
+    const f = planPort({ prefix: 2, structure: tampered() });
+    const d = deps([...args('plan'), '--show-drift'], { openPort: () => f.port });
+    await runCli(d.base);
+    expect(d.lines.join('')).not.toContain(SECRET);
+  });
+});
+
+
+describe('plan --show-drift con columnas de un CHECK en otro orden', () => {
+  it('termina bien y sin líneas de deriva, como una estructura equivalente', async () => {
+    const rows = derivePrefix(SCHEMA_MANIFEST, 2);
+    const check = rows.find(r => r.name === 'CK_user_sessions_times')!;
+    check.columns = ['expires_at', 'created_at', 'last_seen_at', 'revoked_at'];
+    const f = planPort({ prefix: 2, structure: rows });
+    const d = deps([...args('plan'), '--show-drift', '--show-definitions'], { openPort: () => f.port });
+    expect(await runCli(d.base)).toBe(0);
+    expect(JSON.parse(d.lines[0].slice(SUMMARY_PREFIX.length))).toMatchObject({ structure: 'definitions_unpinned', code: null });
+    expect(d.lines.join('')).not.toContain(DRIFT_PREFIX);
+    expect(d.lines.some(l => l.startsWith(DEFINITIONS_PREFIX))).toBe(true);
+  });
+});
+
+describe('plan --show-drift con la forma real de PostgreSQL (orden observado y ARRAY[...])', () => {
+  const realistic = () => {
+    const rows = derivePrefix(SCHEMA_MANIFEST, 2);
+    rows.find(r => r.name === 'CK_user_sessions_times')!.columns = ['expires_at', 'created_at', 'last_seen_at', 'revoked_at'];
+    rows.find(r => r.name === 'CK_organization_memberships_role')!.definition =
+      "CHECK (role::text = ANY (ARRAY['community_manager'::character varying, 'worker'::character varying, 'client'::character varying]::text[]))";
+    return rows;
+  };
+  it('flujo completo con ambas opciones: sin deriva, definiciones impresas', async () => {
+    const f = planPort({ prefix: 2, structure: realistic() });
+    const d = deps([...args('plan'), '--show-drift', '--show-definitions'], { openPort: () => f.port });
+    expect(await runCli(d.base)).toBe(0);
+    expect(JSON.parse(d.lines[0].slice(SUMMARY_PREFIX.length))).toMatchObject({ structure: 'definitions_unpinned', code: null });
+    expect(d.lines.join('')).not.toContain(DRIFT_PREFIX);
+    expect(d.lines.some(l => l.startsWith(DEFINITIONS_PREFIX))).toBe(true);
+  });
+  it('si la evaluación falla con diff vacío, la línea unknown indica la etapa', async () => {
+    const rows = realistic();
+    rows.find(r => r.name === 'CK_organization_memberships_role')!.definition = 'CHECK (role @ 1)';
+    const f = planPort({ prefix: 2, structure: rows });
+    const d = deps([...args('plan'), '--show-drift', '--show-definitions'], { openPort: () => f.port });
+    expect(await runCli(d.base)).toBe(2);
+    const drift = d.lines.filter(l => l.startsWith(DRIFT_PREFIX)).map(l => JSON.parse(l.slice(DRIFT_PREFIX.length)));
+    expect(drift).toEqual([{ category: 'unknown', stage: 'definitions' }, { count: 1, omitted: 0 }]);
   });
 });

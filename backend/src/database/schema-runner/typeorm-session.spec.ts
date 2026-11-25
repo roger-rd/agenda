@@ -1,3 +1,4 @@
+import { withObservedDefinitions } from './testing/observed-initial-definitions';
 import { deriveStructure } from './schema-structure';
 import { DataSource, MigrationExecutor, type QueryRunner, type MigrationInterface } from 'typeorm';
 import type { PostgresDataSourceOptions } from 'typeorm/driver/postgres/PostgresDataSourceOptions';
@@ -46,7 +47,7 @@ function pinned(text: string, world: World, mode: SchemaCommand): unknown[] | un
       ...TABLE_PRIVS.map(privilege => ({ kind: 'table', privilege })), ...['SELECT', 'INSERT', 'UPDATE', 'REFERENCES'].map(privilege => ({ kind: 'column', privilege })),
       ...['USAGE', 'SELECT', 'UPDATE'].map(privilege => ({ kind: 'sequence', privilege }))].map(r => ({ ...r, effective: false, grantable: false }));
     case SQL.APPLICATION_PRIVILEGES_SQL: return currentTables.flatMap(name => TABLE_PRIVS.map(privilege => ({ name, privilege, effective: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'].includes(privilege), grantable: false })));
-    case SQL.STRUCTURE_SQL: return deriveStructure(prefix.flatMap(e => [...e.up]));
+    case SQL.STRUCTURE_SQL: return withObservedDefinitions(deriveStructure(prefix.flatMap(e => [...e.up])));
     case SQL.tablesEmptySql(SCHEMA_MANIFEST[1].tables): return [Object.fromEntries(SCHEMA_MANIFEST[1].tables.map(t => [t, true]))];
     case SQL.TABLES_EMPTY_SQL: return [Object.fromEntries(TABLE_ORDER.map(t => [t, true]))];
     case SQL.TRANSACTION_CLOSED_SQL: return [{ no_xid: world.tx === 'I', no_backend_xid: world.tx === 'I', implicit_transaction: world.tx === 'I' }];
@@ -468,7 +469,7 @@ describe('manifiesto real de dos entradas con ejecutor real y socket simulado', 
   it('plan inicial es upgradable y apply ejecuta solo invitaciones', async () => {
     const plan = harness('plan', initial);
     expect(await runSchema({ command: 'plan', port: plan.port, ...virtual() })).toMatchObject({
-      state: 'upgradable', pending: [SCHEMA_MANIFEST[1].name], structure: 'definitions_unpinned', exit: 0,
+      state: 'upgradable', pending: [SCHEMA_MANIFEST[1].name], structure: 'verified', exit: 0,
     });
     const apply = harness('apply', { ...initial, executed: [...initial.executed] });
     expect(await runSchema({ command: 'apply', port: apply.port, ...virtual() })).toMatchObject({ state: 'applied', executed: NAMES, pending: [], exit: 0 });

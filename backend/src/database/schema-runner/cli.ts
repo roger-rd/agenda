@@ -5,10 +5,11 @@ import { authorize, parseArguments } from './schema-guards';
 import { createSchemaDataSourceOptions } from './schema-data-source';
 import { refusal, runSchema, summaryOf, type RunResult, type RunnerCode, type SchemaPort, type Timers } from './schema-runner';
 import { BUDGET, SchemaRunnerError, SUMMARY_PREFIX, type SchemaCommand } from './schema-target';
+import { projectDriftLine } from './schema-structure';
 import { createTypeOrmPort } from './typeorm-session';
 
 /**
- * Command line of the schema runner: `<plan|apply|revert> --env=test --target=agenda_test --confirm=<token> [--show-definitions solo en plan]`.
+ * Command line of the schema runner: `<plan|apply|revert> --env=test --target=agenda_test --confirm=<token> [--show-definitions solo en plan] [--show-drift solo en plan]`.
  * Everything that touches the process is injected into runCli, so the whole flow is exercised offline; only main()
  * binds the real process. El resumen usa una proyección cerrada; plan puede añadir definiciones validadas y su digest.
  * Ningún mensaje del driver ni traza llega a stdout. Exit codes: 0 verified success, 2 refused or failed with a verified closure, 3 outcome or closure
@@ -28,6 +29,7 @@ export interface CliDeps {
   readonly openPort?: (options: PostgresDataSourceOptions, mode: SchemaCommand) => SchemaPort;
 }
 
+export const DRIFT_PREFIX = 'AGENDA_SCHEMA_DRIFT ';
 export const DEFINITIONS_PREFIX = 'AGENDA_SCHEMA_DEFINITIONS ';
 
 const SIGNALS = ['SIGINT', 'SIGTERM'] as const;
@@ -41,6 +43,10 @@ export async function runCli(deps: CliDeps): Promise<number> {
   let aborted = false;
   const emit = (result: RunResult) => {
     deps.write(`${SUMMARY_PREFIX}${JSON.stringify(summaryOf(result))}\n`);
+    if (result.drift) {
+      for (const line of result.drift.lines) deps.write(`${DRIFT_PREFIX}${JSON.stringify(projectDriftLine(line))}\n`);
+      deps.write(`${DRIFT_PREFIX}${JSON.stringify({ count: result.drift.lines.length, omitted: result.drift.omitted })}\n`);
+    }
     if (result.definitions.length === 0 || result.definitionsOmitted) return;
     for (const line of result.definitions) deps.write(`${DEFINITIONS_PREFIX}${JSON.stringify({ kind: line.kind, table: line.table, name: line.name, definition: line.definition })}\n`);
     deps.write(`${DEFINITIONS_PREFIX}${JSON.stringify({ structureDigest: result.structureDigest, count: result.definitions.length })}\n`);
@@ -57,11 +63,11 @@ export async function runCli(deps: CliDeps): Promise<number> {
   let command: SchemaCommand | null = null;
   try {
     command = authorize(deps.argv);
-    const { showDefinitions } = parseArguments(deps.argv);
+    const { showDefinitions, showDrift } = parseArguments(deps.argv);
     const config = loadOwnerConfiguration({ cwd: deps.cwd, fs: deps.fs });
     const options = createSchemaDataSourceOptions(config, command, { logger: silentLogger() });
     const port = deps.openPort ? deps.openPort(options, command) : createTypeOrmPort({ options, mode: command });
-    const result = await runSchema({ command, showDefinitions, port, clock: deps.clock, timers: deps.timers, aborted: () => aborted });
+    const result = await runSchema({ command, showDefinitions, showDrift, port, clock: deps.clock, timers: deps.timers, aborted: () => aborted });
     if (!finished) { finished = true; emit(result); }
     return result.exit;
   } catch (error) {

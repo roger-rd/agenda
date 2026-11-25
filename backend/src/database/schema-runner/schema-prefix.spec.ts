@@ -119,7 +119,7 @@ function fake(command: SchemaCommand, start: number, options: { structure?: unkn
     transactionEvidence() { return { clientStatus: tx ? 'T' : 'I', queryRunnerActive: tx }; },
     async close() { events.push('close'); closed = true; }, isClosed() { return closed; },
   };
-  return { events, args, prefix: () => k, durable: () => durable, run: (showDefinitions = false) => runSchema({ command, showDefinitions, port, manifest: entries, ...virtual }) };
+  return { events, args, prefix: () => k, durable: () => durable, run: (showDefinitions = false, showDrift = false) => runSchema({ command, showDefinitions, showDrift, port, manifest: entries, ...virtual }) };
 }
 
 describe('flujo transaccional con manifiesto sintético de dos entradas', () => {
@@ -255,4 +255,82 @@ describe('plan muestra definiciones validadas sin escrituras ni consultas adicio
       expect(JSON.stringify(summaryOf(result))).not.toContain(definition);
       expect(f.events).not.toContain('BEGIN');
     });
+});
+
+describe('plan --show-drift: diagnóstico controlado, solo en plan', () => {
+  const rowsOf = (k: number): StructureRow[] => deriveStructure(manifest.slice(0, k).flatMap(e => [...e.up]));
+  const copy = (rows: StructureRow[]) => rows.map(r => ({ ...r, columns: r.columns && [...r.columns], ref_columns: r.ref_columns && [...r.ref_columns] }));
+
+  it('con deriva y la opción informa líneas sin alterar estructura, código, resultado ni consultas', async () => {
+    const plain = fake('plan', 1, { drift: true }); const shown = fake('plan', 1, { drift: true });
+    const a = await plain.run(); const { drift, ...b } = await shown.run(false, true);
+    expect(a).not.toHaveProperty('drift');
+    expect(a).toMatchObject({ structure: 'drift', code: 'schema_drift', outcome: 'planned' });
+    expect(b).toEqual(a);
+    expect(shown.events).toEqual(plain.events); expect(shown.args).toEqual(plain.args);
+    expect(drift!.lines.length + drift!.omitted).toBe(rowsOf(1).length);
+    expect(drift!.lines.every(line => line.category === 'missing')).toBe(true);
+    expect(Object.isFrozen(drift)).toBe(true);
+    expect(summaryOf({ ...a, drift } as never)).not.toHaveProperty('drift');
+  });
+  it.each([['sin pin', false, 'definitions_unpinned'], ['con pin', true, 'verified']] as const)('estructura sin deriva %s: no hay diagnóstico', async (_label, pin, structure) => {
+    const f = fake('plan', 1, { pin }); const result = await f.run(false, true);
+    expect(result).toMatchObject({ structure, outcome: 'planned', code: null });
+    expect(result).not.toHaveProperty('drift');
+  });
+  it('apply y revert ignoran la opción aunque haya deriva: nada se diagnostica ni se escribe', async () => {
+    for (const command of ['apply', 'revert'] as const) {
+      const f = fake(command, 1, { drift: true });
+      const result = await f.run(false, true);
+      expect(result).toMatchObject({ outcome: 'refused', structure: 'drift', code: 'schema_drift' });
+      expect(result).not.toHaveProperty('drift');
+      expect(f.events).not.toContain('BEGIN'); expect(f.events).not.toContain('migrate'); expect(f.events).not.toContain('revert');
+    }
+  });
+  it('un cambio de forma se informa por campo, con valores seguros', async () => {
+    const rows = copy(rowsOf(1)); rows.find(r => r.kind === 'col')!.type = 'text';
+    const { drift } = await fake('plan', 1, { structure: rows }).run(false, true);
+    expect(drift!.lines).toEqual([{ category: 'changed', kind: 'col', table: 'alpha', name: 'id', field: 'type', expected: 'integer', observed: 'text' }]);
+    expect(drift!.omitted).toBe(0);
+  });
+  it('si solo cambia el texto de una definición se informan únicamente los dos digests', async () => {
+    const pin = definitionsDigest(rowsOf(1));
+    const rows = copy(rowsOf(1)); rows.find(r => r.type === 'c')!.definition = "CHECK (id > 0 AND 'literal-secreto-7Q' = 'literal-secreto-7Q')";
+    const f = fake('plan', 1, { pin: true, structure: rows });
+    const result = await f.run(false, true);
+    expect(result).toMatchObject({ structure: 'drift', code: 'schema_drift', outcome: 'planned', structureDigest: null });
+    expect(result.drift).toEqual({ lines: [{ category: 'definitions', expected: pin, observed: definitionsDigest(rows) }], omitted: 0 });
+    expect(JSON.stringify(result)).not.toContain('literal-secreto-7Q');
+  });
+  it('nunca divulga expresiones ni valores por defecto', async () => {
+    const rows = copy(rowsOf(1)); rows.find(r => r.kind === 'col')!.default_expression = "'super-secreto-7Q'";
+    const result = await fake('plan', 1, { structure: rows }).run(false, true);
+    expect(result.drift!.lines).toEqual([{ category: 'changed', kind: 'col', table: 'alpha', name: 'id', field: 'default_expression', expected: null, observed: '<omitted>' }]);
+    expect(JSON.stringify(result)).not.toContain('super-secreto-7Q');
+  });
+  it('el diagnóstico no depende del orden de las filas del catálogo', async () => {
+    const rows = copy(rowsOf(1)).slice(1);
+    const a = await fake('plan', 1, { structure: rows }).run(false, true);
+    const b = await fake('plan', 1, { structure: [...rows].reverse() }).run(false, true);
+    expect(a.drift).toEqual(b.drift);
+    expect(a.drift!.lines).toHaveLength(1);
+  });
+  it('no produce diagnóstico cuando la estructura es ilegible: solo el estado de deriva', async () => {
+    const result = await fake('plan', 1, { structure: 'ilegible' }).run(false, true);
+    expect(result).toMatchObject({ structure: 'drift', code: 'schema_drift' });
+    expect(result.drift).toEqual({ lines: [{ category: 'unreadable' }], omitted: 0 });
+  });
+});
+
+
+describe('plan con las columnas de un CHECK en otro orden', () => {
+  it('no es deriva de forma: se evalúa como conjunto y el diagnóstico queda vacío', async () => {
+    const rows = deriveStructure(manifest.slice(0, 1).flatMap(e => [...e.up])).map(r => ({ ...r, columns: r.columns && [...r.columns] }));
+    const check = rows.find(r => r.kind === 'con' && r.type === 'c')!;
+    expect(check.columns).toBeDefined();
+    check.columns = [...check.columns!].reverse();
+    const result = await fake('plan', 1, { structure: rows }).run(false, true);
+    expect(result).toMatchObject({ structure: 'definitions_unpinned', code: null, outcome: 'planned' });
+    expect(result).not.toHaveProperty('drift');
+  });
 });
