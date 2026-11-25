@@ -1,3 +1,7 @@
+import { registerInvitationsTest } from './http-invitations';
+import { invitationsMarkers, invitationsCleanupTargets, invitationsCleanupSQL, invitationsCleanupByIdSQL, invitationsSQL, type InvitationsSaved } from './invitations-fixture';
+import { CapturingLoggingModule, logCapture } from './invitations-logging';
+import { LoggingModule } from '../../../src/logging/logging.module';
 import { registerCompaniesWriteTest } from './http-companies-write';
 import { companiesWriteMarkers, companiesWriteCleanupTargets, companiesWriteCleanupSQL } from './companies-write-fixture';
 import { registerCompaniesTest } from './http-companies';
@@ -31,7 +35,7 @@ import { normalizePersonName, organizationNameKey } from '../../../src/identity/
 import { normalizeEmail } from '../../../src/identity/email';
 import { authCleanupSQL, authCleanupTargets, DeleteGate, httpCleanupSQL, httpCleanupTargets, markers, runId, validateRunId } from './markers';
 import { accepted, checkRejected, columnTypeRejected, collisions, distinct, normalizerRejected } from './unicode-cases';
-import type { Phase } from './phase';
+import { assertNodeTimeZone, parseInvitationTimeZone, type Phase } from './phase';
 import { assertFingerprint, businessFingerprint, migrationFingerprint, fingerprintSQL } from './schema-fingerprint';
 import { expectedMigrations, migrationHistorySQL, classifyMigrationHistory, type MigrationHistory } from './migration-history';
 
@@ -46,7 +50,13 @@ type Session = { pid: number; backend_start: Date };
 const failure = (error: unknown) => error instanceof DatabaseOperationError ? error.failure : classifyDatabaseError(error);
 
 export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
-  if (phase === 'auth' || phase === 'companies-write') assertAuthOrigin(process.env.APP_ALLOWED_ORIGINS);
+  if (phase === 'auth' || phase === 'companies-write' || phase === 'invitations') assertAuthOrigin(process.env.APP_ALLOWED_ORIGINS);
+  // The zone reaches every connection through PGOPTIONS (set by the setup file from AGENDA_B2B_TIMEZONE); verify it before connecting.
+  const zone = phase === 'invitations' ? parseInvitationTimeZone(process.env.AGENDA_B2B_TIMEZONE) : undefined;
+  if (zone !== undefined) {
+    if (process.env.PGOPTIONS !== `-c TimeZone=${zone}`) throw new Error('PGOPTIONS no corresponde a AGENDA_B2B_TIMEZONE: el archivo de preparación no se ejecutó');
+    assertNodeTimeZone(process.env, Intl.DateTimeFormat().resolvedOptions().timeZone);
+  }
   describe(`B2B ${phase}`, () => {
     const id = runId(), gate = new DeleteGate(phase), saved: RegistrationResult[] = [];
     const httpTargets = phase === 'http' ? httpCleanupTargets(id) : undefined;
@@ -56,6 +66,10 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
     const companiesSaved: CompaniesSaved = { users: [], memberships: [], companies: [] };
     const companiesWriteReservations = phase === 'companies-write' ? companiesWriteMarkers(id) : undefined;
     const companiesWriteTargets = phase === 'companies-write' ? companiesWriteCleanupTargets(id) : undefined;
+    const invitationsReservations = phase === 'invitations' ? invitationsMarkers(id) : undefined;
+    const invitationsTargets = phase === 'invitations' ? invitationsCleanupTargets(id) : undefined;
+    const invitationsSaved: InvitationsSaved = { users: [], memberships: [], companies: [], invitations: [] };
+    let locker: DataSource | undefined;
     let clock: ControlledClock;
     let observer: DataSource | undefined, source: DataSource, app: INestApplication | undefined, moduleRef: TestingModule | undefined;
     let service: RegistrationService, sequence = 0, ready = false;
@@ -78,6 +92,7 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
       const userIds = saved.map(r => r.user.id), orgIds = saved.map(r => r.organization.id);
       if (companiesWriteTargets) { await cleanupCompaniesWrite(userIds, orgIds); return; }
       if (companiesTargets) { await cleanupCompanies(userIds, orgIds); return; }
+      if (invitationsTargets) { await cleanupInvitations(userIds, orgIds); return; }
       await observer!.query('DELETE FROM public.invitation_companies WHERE organization_id = ANY($1::uuid[])', [orgIds]);
       await observer!.query('DELETE FROM public.invitations WHERE organization_id = ANY($1::uuid[])', [orgIds]);
       await observer!.query('DELETE FROM public.user_sessions WHERE user_id = ANY($1::uuid[])', [userIds]);
@@ -169,6 +184,42 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
     async function register(value: ReturnType<typeof input>, target = service): Promise<RegistrationResult> {
       gate.assertArmed(); const result = await target.register(value); saved.push(result); return result;
     }
+    /**
+     * Exact ids first (every id the application returned or the observer seeded), children before parents, then the exact markers as a
+     * backup for committed requests whose response was lost. It runs from afterAll: it does NOT survive a forced termination of the
+     * process (SIGKILL, power loss); leftovers then show up as non-empty tables in the next run's baseline.
+     */
+    async function cleanupInvitations(userIds: string[], orgIds: string[]): Promise<void> {
+      gate.assertArmed();
+      if (!invitationsTargets) throw new Error('invitations requiere reservas');
+      const users = [...userIds, ...invitationsSaved.users], memberships = [...saved.map(r => r.membership.id), ...invitationsSaved.memberships];
+      try {
+        await observer!.query(invitationsCleanupByIdSQL.invitationCompanies, [invitationsSaved.invitations, orgIds]);
+        await observer!.query(invitationsCleanupByIdSQL.invitations, [invitationsSaved.invitations, orgIds]);
+        await observer!.query(invitationsCleanupByIdSQL.sessions, [users]);
+        await observer!.query(invitationsCleanupByIdSQL.accesses, [memberships, invitationsSaved.companies]);
+        await observer!.query(invitationsCleanupByIdSQL.companies, [invitationsSaved.companies, orgIds]);
+        await observer!.query(invitationsCleanupByIdSQL.memberships, [memberships, users, orgIds]);
+        await observer!.query(invitationsCleanupByIdSQL.users, [users]);
+        await observer!.query(invitationsCleanupByIdSQL.organizations, [orgIds]);
+      } finally {
+        const { emails, organizationNames } = invitationsTargets;
+        await observer!.query(invitationsCleanupSQL.invitationCompanies, [organizationNames]);
+        await observer!.query(invitationsCleanupSQL.invitations, [organizationNames]);
+        await observer!.query(invitationsCleanupSQL.sessions, [emails]);
+        await observer!.query(invitationsCleanupSQL.accesses, [emails, organizationNames]);
+        await observer!.query(invitationsCleanupSQL.companies, [organizationNames]);
+        await observer!.query(invitationsCleanupSQL.memberships, [emails, organizationNames]);
+        await observer!.query(invitationsCleanupSQL.users, [emails]);
+        await observer!.query(invitationsCleanupSQL.organizations, [organizationNames]);
+        await empty();
+      }
+    }
+    /** Backends of THIS run's application pool (the harness assumes it is the only application connected to agenda_test). */
+    async function appPids(): Promise<number[]> {
+      const rows: { pid: number }[] = await observer!.query(invitationsSQL.appSessions);
+      return rows.map(r => r.pid).filter(pid => !beforePids.has(pid));
+    }
     async function captureSessions(): Promise<void> {
       const sessions: Session[] = await observer!.query(sessionSQL);
       ownSessions = sessions.filter(s => !beforePids.has(s.pid));
@@ -180,6 +231,7 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
       } finally {
         try { if (app) await app.close(); else if (moduleRef) await moduleRef.close(); }
         finally {
+          if (locker?.isInitialized) await locker.destroy();
           if (observer?.isInitialized) {
             try {
               const deadline = Date.now() + 5000;
@@ -206,6 +258,12 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
       observer = new DataSource({ ...options, entities: [], extra: { ...options.extra, max: 1, application_name: `agenda-b2b-${id}` } });
       try {
         await observer.initialize();
+        if (phase === 'invitations') {
+          logCapture.reset();
+          // A second connection that only holds locks (the observer has a single connection and keeps polling).
+          locker = new DataSource({ ...options, entities: [], extra: { ...options.extra, max: 1, application_name: `agenda-b2b-${id}-lock` } });
+          await locker.initialize();
+        }
         if (phase === 'readonly') {
           const rows: { ro: string; dro: string }[] = await observer.query(roSQL);
           expect(rows[0]).toMatchObject({ ro: 'on', dro: 'on' });
@@ -229,7 +287,7 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
         const migrations = await observer.query(fingerprintSQL, [['schema_migrations']]);
         console.info('[b2b] huella schema_migrations (referencia 3/1/1)', migrations);
         assertFingerprint('schema_migrations', migrations[0], migrationFingerprint);
-        if (phase === 'auth' || phase === 'companies-write') {
+        if (phase === 'auth' || phase === 'companies-write' || phase === 'invitations') {
           const roles: { pg_get_constraintdef: string }[] = await observer.query("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'CK_organization_memberships_role'");
           expect(roles.length === 1 && roles[0].pg_get_constraintdef.includes("'worker'")).toBe(true);
         }
@@ -247,6 +305,10 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
         clock = new ControlledClock();
         if (phase === 'companies-write') {
           moduleRef = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(Clock).useValue(clock).compile();
+        } else if (phase === 'invitations') {
+          // Real logger options (serializers, redaction, level from LOG_LEVEL): only the destination is replaced by an in-memory capture.
+          moduleRef = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(Clock).useValue(clock)
+            .overrideModule(LoggingModule).useModule(CapturingLoggingModule).compile();
         } else {
           // Preserve the existing auth/companies construction and its offline contract.
         moduleRef = phase === 'auth'
@@ -279,11 +341,15 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
       afterAll(async () => { try { if (gate.isArmed && observer?.isInitialized) await cleanup(); } finally { await close(); } });
     } else if (phase === 'companies-write') {
       afterAll(async () => { try { if (gate.isArmed && observer?.isInitialized) await cleanup(); } finally { await close(); } });
+    } else if (phase === 'invitations') {
+      afterAll(async () => { try { if (gate.isArmed && observer?.isInitialized) await cleanup(); } finally { await close(); } });
     } else {
       afterAll(close); // readonly never registers a cleanup hook.
     }
     test('preflight y AppModule reales', () => expect(ready).toBe(true));
     if (phase === 'companies-write') registerCompaniesWriteTest(() => ({ app: app!, observer: observer!, clock, gate, saved, seeded: companiesSaved, reservations: companiesWriteReservations!, ready }));
+    if (phase === 'invitations') registerInvitationsTest(() => ({ app: app!, source, observer: observer!, locker: locker!, clock, gate, saved, seeded: invitationsSaved,
+      reservations: invitationsReservations!, id, zone: zone!, appPids, logs: logCapture, ready }));
     if (phase === 'companies') registerCompaniesTest(() => ({ app: app!, observer: observer!, gate, saved, seeded: companiesSaved, reservations: companiesReservations!, ready }));
     if (phase === 'auth') registerAuthTest(() => ({ app: app!, observer: observer!, source, clock, gate, saved, id, ready }));
     if (phase === 'http') registerHttpTest(() => ({ app: app!, observer: observer!, gate, saved, id, ready, counts, credentials: input('http') }));

@@ -2,7 +2,7 @@ const { parsePhase, phaseEnvironment } = require('./phase');
 const { guardedQuery } = require('./readonly');
 // First setup: invalid phases stop BEFORE pg/typeorm imports and DATABASE_* reads.
 const phase = parsePhase(process.env.AGENDA_B2B_PHASE, process.env.NODE_ENV);
-const environment = phaseEnvironment(phase, { PGOPTIONS: process.env.PGOPTIONS });
+const environment = phaseEnvironment(phase, { PGOPTIONS: process.env.PGOPTIONS, AGENDA_B2B_TIMEZONE: process.env.AGENDA_B2B_TIMEZONE });
 if (environment.PGOPTIONS === undefined) delete process.env.PGOPTIONS;
 else process.env.PGOPTIONS = environment.PGOPTIONS;
 if (phase === 'readonly') {

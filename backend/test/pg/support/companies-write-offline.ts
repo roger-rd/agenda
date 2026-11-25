@@ -114,7 +114,7 @@ export function registerCompaniesWriteOfflineTests(): void {
       expect(source).toContain("if (phase === 'companies-write') registerCompaniesWriteTest(");
       expect(source).toContain("if (phase === 'companies-write') {\n          moduleRef = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(Clock).useValue(clock).compile();");
       expect(source.indexOf('clock = new ControlledClock()')).toBeGreaterThan(source.indexOf("await empty(); gate.mark('baseline');"));
-      expect(source).toContain("if (phase === 'auth' || phase === 'companies-write') assertAuthOrigin");
+      expect(source).toContain("if (phase === 'auth' || phase === 'companies-write' || phase === 'invitations') assertAuthOrigin");
       expect(source).toContain("} else if (phase === 'companies-write') {\n      afterAll(async () => { try { if (gate.isArmed && observer?.isInitialized) await cleanup(); } finally { await close(); } });");
       const cleanup = source.slice(source.indexOf('async function cleanupCompaniesWrite('), source.indexOf('async function register('));
       expect(cleanup).toContain('await empty();');
