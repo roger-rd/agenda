@@ -267,7 +267,7 @@ export function registerConnectedSuite(phase: Exclude<Phase, 'offline'>): void {
         }
         await captureSessions();
         expect(source.isInitialized).toBe(true); service = app.get(RegistrationService); expect(service).toBeInstanceOf(RegistrationService);
-        expect(app.get(ConstraintRegistry).size).toBe(14);
+        expect(app.get(ConstraintRegistry).size).toBe(17);
         expect(new Set(source.entityMetadatas.map(m => m.target))).toEqual(new Set([User, Organization, OrganizationMembership, UserSession, Company, CompanyAccess]));
         ready = true;
         console.info(`[b2b] preflight completado: migrationHistory=${migrationHistory}`);

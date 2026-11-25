@@ -12,6 +12,7 @@ import { assertFingerprint, businessFingerprint, migrationFingerprint, fingerpri
 import { expectedMigrations, migrationHistorySQL, classifyMigrationHistory } from './support/migration-history';
 import { parsePhase, phaseEnvironment } from './support/phase';
 import { assertReadonlyQuery, guardedQuery } from './support/readonly';
+import { SCHEMA_CONSTRAINTS } from '../../src/database/errors/register-schema-constraints';
 import { authCleanupSQL, DeleteGate, httpCleanupSQL, httpCleanupTargets, httpMarkers, markers, runId, validateRunId } from './support/markers';
 import { normalizerRejected, checkRejected, columnTypeRejected, collisions, distinct } from './support/unicode-cases';
 import { normalizePersonName, organizationNameKey } from '../../src/identity/person-name';
@@ -33,6 +34,14 @@ if (phase === 'offline') {
       expect(source).toContain("import { CompanyAccess } from '../../../src/persistence/entities/company-access.entity';");
       expect(source).toContain("import { UserSession } from '../../../src/persistence/entities/user-session.entity';");
       expect(source).toContain('expect(new Set(source.entityMetadatas.map(m => m.target))).toEqual(new Set([User, Organization, OrganizationMembership, UserSession, Company, CompanyAccess]));');
+    });
+    test('connected exige el registro de restricciones completo (17, incluidas las tres de invitaciones)', () => {
+      const source = readFileSync(join(__dirname, 'support/connected.ts'), 'utf8');
+      expect(SCHEMA_CONSTRAINTS).toHaveLength(17);
+      expect(SCHEMA_CONSTRAINTS.filter(c => c.name.includes('_invitations_')).map(c => c.name).sort())
+        .toEqual(['CK_invitations_email', 'CK_invitations_role', 'UQ_invitations_open_email']);
+      expect(source).toContain('expect(app.get(ConstraintRegistry).size).toBe(17);');
+      expect(source).not.toContain('.size).toBe(14)');
     });
     test('huellas: referencias exactas de negocio y schema_migrations', () => {
       expect(businessFingerprint).toEqual({ columns: 82, constraints: 80, indexes: 33 });
