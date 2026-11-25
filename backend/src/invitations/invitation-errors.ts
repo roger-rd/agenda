@@ -12,8 +12,10 @@ export const INVITATION_CONFLICTS = Object.freeze({
 } as const);
 export type InvitationConflictCode = keyof typeof INVITATION_CONFLICTS;
 
+/** Conflicts caused by the email point at it; state conflicts of an existing invitation carry no field. */
+const EMAIL_CONFLICTS: readonly InvitationConflictCode[] = ['invitation_pending_exists', 'member_already_active', 'member_deactivated'];
 export class InvitationConflictError extends DomainError {
-  constructor(code: InvitationConflictCode) { super(code, 409, INVITATION_CONFLICTS[code]); }
+  constructor(code: InvitationConflictCode) { super(code, 409, INVITATION_CONFLICTS[code], EMAIL_CONFLICTS.includes(code) ? 'email' : undefined); }
 }
 
 /**

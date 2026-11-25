@@ -1,4 +1,7 @@
 import { CompaniesController } from './companies/companies.controller';
+import { InvitationsController } from './invitations/invitations.controller';
+import { InvitationsService } from './invitations/invitations.service';
+import { InvitationTokens, RandomInvitationTokens } from './invitations/invitation-token';
 import { Company } from './persistence/entities/company.entity';
 import { CompanyAccess } from './persistence/entities/company-access.entity';
 import { AuthController } from './auth/auth.controller';
@@ -75,6 +78,14 @@ describe('AppModule', () => {
       expect(Reflect.getMetadata(METHOD_METADATA, CompaniesController.prototype.create)).toBe(RequestMethod.POST);
       expect(Reflect.getMetadata(METHOD_METADATA, CompaniesController.prototype.update)).toBe(RequestMethod.PATCH);
       expect(Reflect.getMetadata(PATH_METADATA, CompaniesController.prototype.update)).toBe(':id');
+      expect(moduleRef.get(InvitationsController)).toBeInstanceOf(InvitationsController);
+      expect(moduleRef.get(InvitationsService)).toBeInstanceOf(InvitationsService);
+      expect(moduleRef.get(InvitationTokens)).toBeInstanceOf(RandomInvitationTokens);
+      expect(Reflect.getMetadata(PATH_METADATA, InvitationsController)).toBe('invitations');
+      for (const [name, method, path] of [['create', RequestMethod.POST, '/'], ['list', RequestMethod.GET, '/'], ['revoke', RequestMethod.POST, ':id/revoke'], ['renew', RequestMethod.POST, ':id/renew']] as const) {
+        expect(Reflect.getMetadata(METHOD_METADATA, InvitationsController.prototype[name])).toBe(method);
+        expect(Reflect.getMetadata(PATH_METADATA, InvitationsController.prototype[name])).toBe(path);
+      }
       expect(app).toBeDefined();
     } finally {
       await app.close();

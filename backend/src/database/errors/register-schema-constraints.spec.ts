@@ -1,4 +1,5 @@
 import { SCHEMA_MANIFEST } from '../migrations/schema-manifest';
+import { INVITATION_CONFLICTS } from '../../invitations/invitation-errors';
 import { ConstraintRegistry } from './constraint-registry';
 import { registerSchemaConstraints, SCHEMA_CONSTRAINTS } from './register-schema-constraints';
 it('todos los nombres exactos existen en el manifiesto, sin duplicados ni internos', () => {
@@ -6,11 +7,17 @@ it('todos los nombres exactos existen en el manifiesto, sin duplicados ni intern
   const registry = registerSchemaConstraints(new ConstraintRegistry());
   expect(registry.size).toBe(SCHEMA_CONSTRAINTS.length);
   for (const entry of SCHEMA_CONSTRAINTS) {
-    expect(schema).toContain(`CONSTRAINT "${entry.name}"`);
+    // Table constraints are declared as CONSTRAINT "name"; the open-invitation uniqueness is a unique index.
+    expect(schema.includes(`CONSTRAINT "${entry.name}"`) || schema.includes(`INDEX "${entry.name}"`)).toBe(true);
     expect(entry.name).not.toMatch(/_id_|_v7|_version|_hash|_times/);
     expect(entry.field).toBeTruthy();
     expect(entry.kind === 'unique' ? registry.unique(entry.name) : registry.check(entry.name)).toEqual(entry);
   }
+});
+
+it('la unicidad de invitaciones abiertas coincide con el conflicto de dominio: mismo código, mensaje y campo', () => {
+  const entry = registerSchemaConstraints(new ConstraintRegistry()).unique('UQ_invitations_open_email')!;
+  expect(entry).toMatchObject({ code: 'invitation_pending_exists', field: 'email', message: INVITATION_CONFLICTS.invitation_pending_exists });
 });
 
 // También ejercita el recorrido completo sin sockets, útil en sandboxes sin listen.
