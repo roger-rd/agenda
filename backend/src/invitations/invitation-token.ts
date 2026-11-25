@@ -33,3 +33,11 @@ export function buildInvitationLink(token: string): string {
   if (!isInvitationToken(token)) throw new Error('Token de invitación inválido');
   return `${INVITATION_LINK_PATH}#${token}`;
 }
+
+/** Injectable source of tokens, so the service can be tested with fixed bytes. */
+export abstract class InvitationTokens {
+  abstract next(): string;
+}
+export class RandomInvitationTokens extends InvitationTokens {
+  next(): string { return generateInvitationToken(); }
+}
