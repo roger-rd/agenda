@@ -63,7 +63,7 @@ export type AcceptanceDecision = 'proceed' | 'unavailable' | 'expired' | 'clock_
  * accepted or revoked -> unavailable; a clock earlier than created_at -> controlled failure (never hidden with GREATEST: it would
  * risk an acceptance mark outside the validity window); expires_at <= now -> expired; otherwise proceed.
  */
-export function acceptanceDecision(row: LockedInvitation | null, now: Date): AcceptanceDecision {
+export function acceptanceDecision(row: Pick<LockedInvitation, 'createdAt' | 'expiresAt' | 'revokedAt' | 'acceptedAt'> | null, now: Date): AcceptanceDecision {
   if (row === null || row.acceptedAt !== null || row.revokedAt !== null) return 'unavailable';
   if (now.getTime() < row.createdAt.getTime()) return 'clock_before_creation';
   return row.expiresAt.getTime() <= now.getTime() ? 'expired' : 'proceed';

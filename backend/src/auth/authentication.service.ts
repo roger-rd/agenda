@@ -8,14 +8,14 @@ import { IdGenerator } from '../common/ids/id-generator';
 import { normalizeEmail } from '../identity/email';
 import { PasswordHasher } from '../identity/password-hasher';
 import { preparePassword } from '../identity/password-policy';
-import { deriveCsrfToken, hashSessionToken, isSessionToken } from '../identity/session-token';
+import { hashSessionToken, isSessionToken } from '../identity/session-token';
 import { User } from '../persistence/entities/user.entity';
 import { Organization } from '../persistence/entities/organization.entity';
 import { OrganizationMembership } from '../persistence/entities/organization-membership.entity';
 import { UserSession } from '../persistence/entities/user-session.entity';
 import { TransactionRunner } from '../registration/transaction-runner';
 import { translateAuthPersistenceError } from './auth-errors';
-import { SESSION_POLICY } from './session-policy';
+import { issueSession } from './session-issue';
 
 export const SESSION_TOKEN_FACTORY = Symbol('SESSION_TOKEN_FACTORY');
 export interface SessionIdentity {
@@ -72,14 +72,13 @@ export class AuthenticationService {
         const active = memberships.length === 1 ? memberships[0] : null;
         const now = this.clock.now();
         const token = this.tokenFactory();
-        const maxAgeSeconds = Math.min(SESSION_POLICY.idleSeconds, SESSION_POLICY.absoluteSeconds);
-        const expiresAt = new Date(now.getTime() + maxAgeSeconds * 1000);
         if (isSessionToken(input.presentedSessionToken)) {
           await manager.query(ROTATE_SESSION_SQL, [now, hashSessionToken(input.presentedSessionToken), user.id]);
         }
-        await manager.insert(UserSession, { id: this.ids.next(), tokenHash: hashSessionToken(token), userId: user.id,
-          activeOrganizationId: active?.organizationId ?? null, createdAt: now, lastSeenAt: now, expiresAt, revokedAt: null });
-        return { token, csrfToken: deriveCsrfToken(token), expiresAt, maxAgeSeconds,
+        // Same order as before: rotation of the presented session first, then the new id and the insert.
+        const issue = issueSession({ now, token, id: this.ids.next(), userId: user.id, activeOrganizationId: active?.organizationId ?? null });
+        await manager.insert(UserSession, issue.row);
+        return { token, csrfToken: issue.csrfToken, expiresAt: issue.expiresAt, maxAgeSeconds: issue.maxAgeSeconds,
           user: { id: user.id, email: user.email, name: user.name },
           organization: active ? { id: active.organization.id, name: active.organization.name } : null,
           membership: active ? { id: active.id, role: active.role } : null };

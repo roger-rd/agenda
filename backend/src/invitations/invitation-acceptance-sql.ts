@@ -7,8 +7,8 @@
 /** Read without locking, to decide early (before hashing) and to inspect. Never selects token_hash. */
 export const INSPECT_INVITATION_SQL = 'SELECT i.id, i.email, i.role, i.created_at, i.expires_at, i.revoked_at, i.accepted_at, o.name AS organization_name, ARRAY(SELECT c.name FROM public.invitation_companies ic JOIN public.companies c ON c.id = ic.company_id AND c.organization_id = ic.organization_id WHERE ic.invitation_id = i.id AND ic.organization_id = i.organization_id ORDER BY c.name)::text[] AS company_names FROM public.invitations i JOIN public.organizations o ON o.id = i.organization_id WHERE i.token_hash = $1';
 
-/** Locks the row until the end of the transaction; the clock is read after this returns. */
-export const LOCK_INVITATION_BY_TOKEN_SQL = 'SELECT i.id, i.organization_id, i.email, i.role, i.created_at, i.expires_at, i.revoked_at, i.accepted_at FROM public.invitations i WHERE i.token_hash = $1 FOR UPDATE OF i';
+/** Locks only the invitation row (FOR UPDATE OF i) until the end of the transaction; the clock is read after this returns. */
+export const LOCK_INVITATION_BY_TOKEN_SQL = 'SELECT i.id, i.organization_id, i.email, i.role, i.created_at, i.expires_at, i.revoked_at, i.accepted_at, o.name AS organization_name FROM public.invitations i JOIN public.organizations o ON o.id = i.organization_id WHERE i.token_hash = $1 FOR UPDATE OF i';
 
 /** $1 invitation, $2 organization. */
 export const ACCEPTANCE_COMPANIES_SQL = 'SELECT company_id FROM public.invitation_companies WHERE invitation_id = $1 AND organization_id = $2 ORDER BY company_id';
