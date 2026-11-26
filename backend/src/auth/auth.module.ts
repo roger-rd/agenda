@@ -19,6 +19,6 @@ import { SessionService } from './session.service';
   controllers: [AuthController],
   providers: [SessionAuthGuard, RoleGuard, SessionService, AuthenticationService, { provide: TransactionRunner, useClass: DataSourceTransactionRunner },
     { provide: SESSION_TOKEN_FACTORY, useValue: () => generateSessionToken() }],
-  exports: [ClockModule, AuthenticationService, SessionService, SessionAuthGuard, RoleGuard],
+  exports: [ClockModule, AuthenticationService, SessionService, SessionAuthGuard, RoleGuard, SESSION_TOKEN_FACTORY],
 })
 export class AuthModule {}

@@ -1,5 +1,8 @@
 import { CompaniesController } from './companies/companies.controller';
 import { InvitationsController } from './invitations/invitations.controller';
+import { InvitationAcceptanceController } from './invitations/invitation-acceptance.controller';
+import { InvitationAcceptanceService } from './invitations/invitation-acceptance.service';
+import { SESSION_TOKEN_FACTORY } from './auth/authentication.service';
 import { InvitationsService } from './invitations/invitations.service';
 import { InvitationTokens, RandomInvitationTokens } from './invitations/invitation-token';
 import { Company } from './persistence/entities/company.entity';
@@ -85,6 +88,16 @@ describe('AppModule', () => {
       for (const [name, method, path] of [['create', RequestMethod.POST, '/'], ['list', RequestMethod.GET, '/'], ['revoke', RequestMethod.POST, ':id/revoke'], ['renew', RequestMethod.POST, ':id/renew']] as const) {
         expect(Reflect.getMetadata(METHOD_METADATA, InvitationsController.prototype[name])).toBe(method);
         expect(Reflect.getMetadata(PATH_METADATA, InvitationsController.prototype[name])).toBe(path);
+      }
+      // Public acceptance routes: same limited hasher instance as registration and login, and the shared session token factory.
+      expect(moduleRef.get(InvitationAcceptanceController)).toBeInstanceOf(InvitationAcceptanceController);
+      const acceptance = moduleRef.get(InvitationAcceptanceService) as unknown as { hasher: PasswordHasher; newSessionToken: () => string };
+      expect(acceptance.hasher).toBe(hasher);
+      expect(acceptance.newSessionToken).toBe(moduleRef.get(SESSION_TOKEN_FACTORY, { strict: false }));
+      expect(Reflect.getMetadata(PATH_METADATA, InvitationAcceptanceController)).toBe('invitations');
+      for (const [name, path] of [['inspect', 'inspect'], ['accept', 'accept']] as const) {
+        expect(Reflect.getMetadata(METHOD_METADATA, InvitationAcceptanceController.prototype[name])).toBe(RequestMethod.POST);
+        expect(Reflect.getMetadata(PATH_METADATA, InvitationAcceptanceController.prototype[name])).toBe(path);
       }
       expect(app).toBeDefined();
     } finally {
