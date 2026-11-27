@@ -1,5 +1,5 @@
-export type Phase = 'offline' | 'readonly' | 'dml' | 'http' | 'auth' | 'companies' | 'companies-write' | 'invitations' | 'acceptance';
-const PHASES: readonly string[] = ['offline', 'readonly', 'dml', 'http', 'auth', 'companies', 'companies-write', 'invitations', 'acceptance'];
+export type Phase = 'offline' | 'readonly' | 'dml' | 'http' | 'auth' | 'companies' | 'companies-write' | 'invitations' | 'acceptance' | 'members';
+const PHASES: readonly string[] = ['offline', 'readonly', 'dml', 'http', 'auth', 'companies', 'companies-write', 'invitations', 'acceptance', 'members'];
 /** Closed list of PostgreSQL session time zones the invitations phase may run under (one full run per zone). */
 export const INVITATION_TIME_ZONES = ['UTC', 'America/Santiago', 'Asia/Kolkata', 'Pacific/Chatham'] as const;
 export type InvitationTimeZone = (typeof INVITATION_TIME_ZONES)[number];
@@ -14,10 +14,19 @@ export function parseAcceptanceTimeZone(value: unknown): AcceptanceTimeZone {
   }
   return value as AcceptanceTimeZone;
 }
+/** The members phase compares dates only as instants: one zone, the plain one. */
+export const MEMBERS_TIME_ZONES = ['UTC'] as const;
+export type MembersTimeZone = (typeof MEMBERS_TIME_ZONES)[number];
+export function parseMembersTimeZone(value: unknown): MembersTimeZone {
+  if (typeof value !== 'string' || !(MEMBERS_TIME_ZONES as readonly string[]).includes(value)) {
+    throw new Error(`AGENDA_B2B_TIMEZONE obligatoria en la fase members: ${MEMBERS_TIME_ZONES.join(', ')}`);
+  }
+  return value as MembersTimeZone;
+}
 export function parsePhase(value: unknown, nodeEnv: unknown): Phase {
   if (value === 'cleanup') throw new Error('fase cleanup requiere autorización específica');
   if (typeof value !== 'string' || !PHASES.includes(value)) {
-    throw new Error('AGENDA_B2B_PHASE obligatoria: offline, readonly, dml, http, auth, companies, companies-write, invitations o acceptance (antes de importar pg/typeorm o leer DATABASE_*)');
+    throw new Error('AGENDA_B2B_PHASE obligatoria: offline, readonly, dml, http, auth, companies, companies-write, invitations, acceptance o members (antes de importar pg/typeorm o leer DATABASE_*)');
   }
   if (nodeEnv !== 'test') throw new Error('NODE_ENV debe ser test');
   return value as Phase;
@@ -45,6 +54,7 @@ export function phaseEnvironment(phase: Phase, input: Record<string, string | un
   // Session configuration only (never ALTER ROLE/DATABASE): the zone reaches the observer, the locker and the application pool.
   else if (phase === 'invitations') output.PGOPTIONS = `-c TimeZone=${parseInvitationTimeZone(input.AGENDA_B2B_TIMEZONE)}`;
   else if (phase === 'acceptance') output.PGOPTIONS = `-c TimeZone=${parseAcceptanceTimeZone(input.AGENDA_B2B_TIMEZONE)}`;
+  else if (phase === 'members') output.PGOPTIONS = `-c TimeZone=${parseMembersTimeZone(input.AGENDA_B2B_TIMEZONE)}`;
   else delete output.PGOPTIONS;
   return output;
 }
