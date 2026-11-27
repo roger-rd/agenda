@@ -1,5 +1,7 @@
 import { CompaniesController } from './companies/companies.controller';
 import { InvitationsController } from './invitations/invitations.controller';
+import { MembersController } from './members/members.controller';
+import { MembersService } from './members/members.service';
 import { InvitationAcceptanceController } from './invitations/invitation-acceptance.controller';
 import { InvitationAcceptanceService } from './invitations/invitation-acceptance.service';
 import { SESSION_TOKEN_FACTORY } from './auth/authentication.service';
@@ -98,6 +100,13 @@ describe('AppModule', () => {
       for (const [name, path] of [['inspect', 'inspect'], ['accept', 'accept']] as const) {
         expect(Reflect.getMetadata(METHOD_METADATA, InvitationAcceptanceController.prototype[name])).toBe(RequestMethod.POST);
         expect(Reflect.getMetadata(PATH_METADATA, InvitationAcceptanceController.prototype[name])).toBe(path);
+      }
+      expect(moduleRef.get(MembersController)).toBeInstanceOf(MembersController);
+      expect(moduleRef.get(MembersService)).toBeInstanceOf(MembersService);
+      expect(Reflect.getMetadata(PATH_METADATA, MembersController)).toBe('members');
+      for (const [name, method, path] of [['list', RequestMethod.GET, '/'], ['updateAccesses', RequestMethod.PUT, ':id/accesses']] as const) {
+        expect(Reflect.getMetadata(METHOD_METADATA, MembersController.prototype[name])).toBe(method);
+        expect(Reflect.getMetadata(PATH_METADATA, MembersController.prototype[name])).toBe(path);
       }
       expect(app).toBeDefined();
     } finally {
