@@ -17,11 +17,11 @@ export class DeleteGate {
   constructor(private readonly phase: Phase) {}
   mark(check: 'identity' | 'schema' | 'baseline'): void { this.passed.add(check); }
   arm(): void {
-    if ((this.phase !== 'dml' && this.phase !== 'http' && this.phase !== 'auth' && this.phase !== 'companies' && this.phase !== 'companies-write' && this.phase !== 'invitations') || this.passed.size !== 3) throw new Error('Armado requiere dml, http, auth, companies o companies-write, identidad, esquema y línea base');
+    if ((this.phase !== 'dml' && this.phase !== 'http' && this.phase !== 'auth' && this.phase !== 'companies' && this.phase !== 'companies-write' && this.phase !== 'invitations' && this.phase !== 'acceptance') || this.passed.size !== 3) throw new Error('Armado requiere dml, http, auth, companies o companies-write, identidad, esquema y línea base');
     this.armed = true;
   }
   assertArmed(): void {
-    if ((this.phase !== 'dml' && this.phase !== 'http' && this.phase !== 'auth' && this.phase !== 'companies' && this.phase !== 'companies-write' && this.phase !== 'invitations') || !this.armed) throw new Error('Borrado requiere dml, http, auth, companies o companies-write y gate armado');
+    if ((this.phase !== 'dml' && this.phase !== 'http' && this.phase !== 'auth' && this.phase !== 'companies' && this.phase !== 'companies-write' && this.phase !== 'invitations' && this.phase !== 'acceptance') || !this.armed) throw new Error('Borrado requiere dml, http, auth, companies o companies-write y gate armado');
   }
   get isArmed(): boolean { return this.armed; }
 }

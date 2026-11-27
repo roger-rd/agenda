@@ -5,6 +5,7 @@ import { derivePrefix, footprintOf } from '../../src/database/schema-runner/sche
 import { tablesOfPrefix } from '../../src/database/schema-runner/schema-guards';
 import { registerCompaniesWriteOfflineTests } from './support/companies-write-offline';
 import { registerInvitationsOfflineTests } from './support/invitations-offline';
+import { registerAcceptanceOfflineTests } from './support/acceptance-offline';
 import { registerCompaniesOfflineTests } from './support/companies-offline';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -24,6 +25,7 @@ const phase = parsePhase(process.env.AGENDA_B2B_PHASE, process.env.NODE_ENV);
 if (phase === 'offline') {
   registerCompaniesWriteOfflineTests();
   registerInvitationsOfflineTests();
+  registerAcceptanceOfflineTests();
   registerAuthOfflineTests();
   registerCompaniesOfflineTests();
   describe('B2B offline (sin DATABASE_* ni conexiones)', () => {
@@ -115,7 +117,7 @@ if (phase === 'offline') {
       expect(() => parsePhase('cleanup', 'test')).toThrow('fase cleanup requiere autorización específica');
       expect(() => parsePhase('offline', 'development')).toThrow('NODE_ENV');
     });
-    test.each(['offline', 'readonly', 'dml', 'http', 'auth', 'companies', 'companies-write', 'invitations'])('fase válida %s', value => expect(parsePhase(value, 'test')).toBe(value));
+    test.each(['offline', 'readonly', 'dml', 'http', 'auth', 'companies', 'companies-write', 'invitations', 'acceptance'])('fase válida %s', value => expect(parsePhase(value, 'test')).toBe(value));
     test.each(['SELECT 1', 'SHOW server_version', 'BEGIN', 'BEGIN READ ONLY', 'START TRANSACTION READ ONLY',
       'SELECT name FROM public.schema_migrations WHERE name = $1', 'SELECT to_regclass($1) AS relation',
       'ROLLBACK', 'COMMIT;', 'SELECT version()', 'SELECT * FROM current_schema()', 'SELECT * FROM current_database()',
